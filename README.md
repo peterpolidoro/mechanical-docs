@@ -6,7 +6,8 @@ and LEGO-style assembly manual, with matching web and printable PDF versions.
 Future uses include maintenance, replacement, disassembly and inspection guides.
 
 **Status: first working slice on synthetic fixtures (2026-10-21).** A validated
-draft-1 manifest loader, a FreeCAD STEP-to-mesh stage, a Blender render stage,
+draft-1 manifest loader, a FreeCAD STEP-to-mesh stage, a Blender render stage
+(Cycles with OpenImageDenoise through the `bpy` wheel, EEVEE on the Guix Blender),
 and a document stage that writes one `manual.json` and generates HTML and a Typst
 PDF from it, with an output checker. Two synthetic fixtures build end to end.
 No production CAD has been processed, and no procedure is physically validated.
@@ -31,18 +32,23 @@ validated manifests   GLB per part + meshes.json    PNGs + render-receipt.json  
 ```
 
 ```sh
-tools/build-fixture.sh                                   # all stages, examples/three-part-fixture -> build/three-part-fixture/
-tools/build-fixture.sh examples/two-bases-fixture        # the second fixture
+tools/build-fixture.sh --renderer pixi                   # all stages, Cycles via the bpy wheel -> build/three-part-fixture/
+tools/build-fixture.sh examples/two-bases-fixture --renderer pixi
+tools/build-fixture.sh                                   # Guix Blender: EEVEE (that package has no denoiser)
 tools/build-fixture.sh . --preview                       # small fast images
 guix shell --pure -m manifest.scm -- python3 -B -m pytest -q tests
 ```
+
+The Pixi route needs `pixi install -e render` once (and, inside a Guix shell,
+`CONDA_OVERRIDE_GLIBC` set to the host glibc); see [docs/environment.md](docs/environment.md).
 
 Or stage by stage, each in its Guix role (see [docs/environment.md](docs/environment.md)):
 
 ```sh
 python3 -m mechanical_docs inspect examples/three-part-fixture --json build/inspect.json
 FreeCADCmd mechanical_docs/cad_mesh.py --pass examples/three-part-fixture build/meshes
-blender -b --python mechanical_docs/render.py -- examples/three-part-fixture build/meshes/meshes.json build/renders [--preview] [--engine CYCLES]
+pixi run -e render render examples/three-part-fixture build/meshes/meshes.json build/renders [--preview] [--engine BLENDER_EEVEE_NEXT]
+blender -b --python mechanical_docs/render.py -- examples/three-part-fixture build/meshes/meshes.json build/renders --engine BLENDER_EEVEE_NEXT
 python3 -m mechanical_docs manual examples/three-part-fixture --renders build/renders --out build/manual --meshes build/meshes/meshes.json
 python3 -m mechanical_docs check build/manual
 ```

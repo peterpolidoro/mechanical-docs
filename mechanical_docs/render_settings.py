@@ -25,9 +25,24 @@ PALETTE = {
 }
 
 DEFAULTS = {
-    "engine": "BLENDER_EEVEE_NEXT",
-    "samples": 64,
+    # Cycles path tracing is the reference look (contact shadows, physically based
+    # shading); it needs a Blender with OpenImageDenoise, which the official bpy
+    # wheel has and the Guix package lacks. Pass --engine BLENDER_EEVEE_NEXT for
+    # fast, noise-free rasterised images on a Blender without the denoiser.
+    "engine": "CYCLES",
+    "samples": 64,                 # EEVEE TAA samples
     "preview_samples": 8,
+    "cycles_samples": 64,          # Cycles path-tracing samples (adaptive, denoised)
+    "cycles_preview_samples": 16,
+    "cycles_adaptive_threshold": 0.01,
+    "cycles_max_bounces": 4,       # flat illustration lighting converges in a few bounces
+    "cycles_persistent_data": True,  # keep the BVH between views
+    # A floor just under the lowest visible point of a view, catching contact
+    # shadows onto the transparent film (Cycles only; EEVEE has no shadow catcher).
+    # The catcher costs Cycles a second full pass (about 4x the view time), so by
+    # default only the part thumbnails and the overview get it; add "step" and
+    # "step-result" to `views` for the step images too.
+    "floor": {"enabled": "auto", "views": ["part-thumbnail", "overview"], "color": [0.46, 0.47, 0.49], "roughness": 0.9, "size_factor": 40},
     "long_side_px": 1600,
     "preview_long_side_px": 480,
     "thumbnail_px": 600,
@@ -59,7 +74,7 @@ DEFAULTS = {
 }
 
 # render.json may set these top-level keys; palette entries may be added, not the whole palette replaced.
-OVERRIDABLE = {"engine", "samples", "preview_samples", "long_side_px", "preview_long_side_px", "thumbnail_px", "aspect", "fill",
+OVERRIDABLE = {"engine", "samples", "preview_samples", "cycles_samples", "cycles_preview_samples", "cycles_adaptive_threshold", "cycles_max_bounces", "cycles_persistent_data", "floor", "long_side_px", "preview_long_side_px", "thumbnail_px", "aspect", "fill",
                "thumbnail_fill", "thumbnail_direction", "film_transparent", "view_transform", "look", "exposure", "world", "studio",
                "default_look", "looks", "context_color", "lines", "arrow", "palette", "note", "schema_version"}
 
@@ -85,7 +100,7 @@ def load_settings(project_dir):
     for k, v in data.items():
         if k in ("note", "schema_version"):
             continue
-        if k in ("palette", "looks", "studio", "lines", "arrow", "world") and isinstance(v, dict):
+        if k in ("palette", "looks", "studio", "lines", "arrow", "world", "floor") and isinstance(v, dict):
             s[k].update(v)
         else:
             s[k] = v

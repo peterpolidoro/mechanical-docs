@@ -14,4 +14,5 @@ model-size unit heuristics:
 - `place-base-b` requires only `place-base-a`, so prerequisites are not a chain.
 
 It is a documentation fixture only: not a product, not a manufactured design and
-not a validated procedure. Build it with `tools/build-fixture.sh examples/two-bases-fixture`.
+not a validated procedure. Build it with `tools/build-fixture.sh examples/two-bases-fixture --renderer pixi`
+(Cycles) or without `--renderer` for the Guix Blender's EEVEE.

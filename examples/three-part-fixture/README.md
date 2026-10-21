@@ -42,8 +42,9 @@ part is highlighted, and arrows show the intended downward approach. Web and PDF
 are generated from one `manual.json` and checked against each other.
 
 ```sh
-tools/build-fixture.sh                 # -> build/three-part-fixture/{inspect.json,meshes,renders,manual}
-tools/build-fixture.sh . --preview     # small, fast images into renders-preview/ and manual-preview/
+tools/build-fixture.sh --renderer pixi   # Cycles (bpy wheel) -> build/three-part-fixture/{inspect.json,meshes,renders,manual}
+tools/build-fixture.sh                   # Guix Blender, EEVEE (no denoiser in that package)
+tools/build-fixture.sh . --preview       # small, fast images into renders-preview/ and manual-preview/
 ```
 
 `build/` is ignored by Git. Representative outputs and receipts from the first

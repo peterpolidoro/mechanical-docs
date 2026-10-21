@@ -215,6 +215,9 @@ class Renderer:
         if self.engine == "CYCLES":
             scn.cycles.device = "CPU"
             scn.cycles.use_adaptive_sampling = True
+            scn.cycles.adaptive_threshold = s["cycles_adaptive_threshold"]
+            scn.cycles.max_bounces = s["cycles_max_bounces"]
+            scn.render.use_persistent_data = s["cycles_persistent_data"]
             try:
                 scn.cycles.denoiser = "OPENIMAGEDENOISE"; scn.cycles.use_denoising = True
                 scn.cycles.denoising_input_passes = "RGB_ALBEDO_NORMAL"
@@ -277,7 +280,23 @@ class Renderer:
             lo.location = ctr + d * spec["distance"] * R
             lo.rotation_euler = d.to_track_quat("Z", "Y").to_euler()
             self.lights.append(lo)
-        log(f"studio: centre {[round(v, 4) for v in ctr]} m, R {R:.4f} m, {len(self.lights)} lights")
+        f = self.s["floor"]
+        want = f["enabled"] if f["enabled"] != "auto" else self.engine == "CYCLES"
+        self.floor = None
+        if want and self.engine == "CYCLES" and self.s["film_transparent"]:
+            fm = bpy.data.materials.new("md_floor"); fm.use_nodes = True
+            bsdf = fm.node_tree.nodes["Principled BSDF"]
+            c = f["color"]
+            bsdf.inputs["Base Color"].default_value = (c[0], c[1], c[2], 1)
+            bsdf.inputs["Roughness"].default_value = f["roughness"]; bsdf.inputs["Metallic"].default_value = 0.0
+            me = bpy.data.meshes.new("md_floor"); size = f["size_factor"] * R
+            me.from_pydata([(-size, -size, 0), (size, -size, 0), (size, size, 0), (-size, size, 0)], [], [(0, 1, 2, 3)])
+            me.materials.append(fm)
+            self.floor = bpy.data.objects.new("md_floor", me); self.scn.collection.objects.link(self.floor)
+            self.floor.is_shadow_catcher = True
+        elif want and self.engine != "CYCLES":
+            self.warnings.append("floor shadow catcher requested but only Cycles supports it; no floor rendered")
+        log(f"studio: centre {[round(v, 4) for v in ctr]} m, R {R:.4f} m, {len(self.lights)} lights, floor {'shadow catcher' if self.floor else 'none'}")
 
     # -------------------------------------------------------------- framing
 
@@ -405,6 +424,20 @@ class Renderer:
         if not ok:
             self.checks["problems"].append(f"canonical poses not restored after {view_id} (deviation {worst})")
 
+    def place_floor(self, objs, kind):
+        """The shadow catcher just under the lowest visible point (never under a
+        lifted part alone: the lowest *visible* object sets it), for the view
+        kinds the settings name; hidden otherwise."""
+        if self.floor is None:
+            return
+        self.floor.hide_render = kind not in self.s["floor"]["views"]
+        pts = [o.matrix_world @ Vector(c) for o in objs if not o.hide_render for c in o.bound_box]
+        if not pts or self.floor.hide_render:
+            bpy.context.view_layer.update()
+            return
+        self.floor.location = Vector((self.scene_centre.x, self.scene_centre.y, min(p.z for p in pts) - 1e-4))
+        bpy.context.view_layer.update()
+
     def render_to(self, view_id, samples):
         scn = self.scn
         # a line set over an empty collection logs "strokes set empty"; skip it
@@ -448,10 +481,13 @@ class Renderer:
         return self.s["preview_long_side_px"] if self.preview else self.s["long_side_px"]
 
     def samples(self):
+        if self.engine == "CYCLES":
+            return self.s["cycles_preview_samples"] if self.preview else self.s["cycles_samples"]
         return self.s["preview_samples"] if self.preview else self.s["samples"]
 
     def view_record(self, view_id, path, secs, **extra):
         rec = {"id": view_id, "file": path.name, "sha256": receipts.sha256_file(path), "bytes": path.stat().st_size,
+               "floor_shadow_catcher": bool(self.floor is not None and not self.floor.hide_render),
                "width": self.scn.render.resolution_x, "height": self.scn.render.resolution_y, "seconds": round(secs, 1),
                "camera": {"type": self.cam.data.type, "ortho_scale_m": self.cam.data.ortho_scale if self.cam.data.type == "ORTHO" else None,
                           "location_m": list(self.cam.matrix_world.translation)}}
@@ -471,6 +507,7 @@ class Renderer:
         d = Vector(self.s["thumbnail_direction"]).normalized()
         self.aim(ctr + d * max((mx - mn).length, 1e-3) * 4, ctr, Vector((0, 0, 1)))
         framed = self.fit(corners, "orthographic", self.s["thumbnail_fill"])
+        self.place_floor([t], "part-thumbnail")
         path, secs = self.render_to(view_id, self.samples())
         rec = self.view_record(view_id, path, secs, kind="part-thumbnail", part_id=pid, framed=framed)
         self.restore(); self.verify_restored(view_id)
@@ -482,6 +519,7 @@ class Renderer:
         framed = self.step_camera()
         for o in self.obj_of.values():
             self.coll_subject.objects.link(o)
+        self.place_floor(list(self.obj_of.values()), "overview")
         path, secs = self.render_to(view_id, self.samples())
         hs = self.hotspots(view_id, list(self.obj_of))
         self.write_hotspots(hs)
@@ -521,8 +559,9 @@ class Renderer:
             self.make_arrow(p0, p1, part_size)
             approach = {"occurrence_id": oid, "start_world_translation": T.translation(start), "end_world_translation": T.translation(end),
                         "arrow_from_m": list(p0), "arrow_to_m": list(p1), "validation": step.approach.validation}
-        path, secs = self.render_to(view_id, self.samples())
         visible = st.before + st.added
+        self.place_floor([self.obj_of[oid] for oid in visible], "step-result" if result else "step")
+        path, secs = self.render_to(view_id, self.samples())
         hs = self.hotspots(view_id, visible)
         self.write_hotspots(hs)
         rec = self.view_record(view_id, path, secs, kind="step-result" if result else "step", step_id=step.id, step_index=st.index,
@@ -593,7 +632,7 @@ def main(argv):
     receipt = {
         "kind": "mechanical-docs-render-receipt", "generated_at_utc": receipts.utc_now(),
         "blender": bpy.app.version_string, "python": sys.version.split()[0], "engine": r.engine, "denoiser": r.denoiser,
-        "preview": preview, "samples": r.samples(), "long_side_px": r.long_side(),
+        "preview": preview, "samples": r.samples(), "long_side_px": r.long_side(), "floor_shadow_catcher": r.floor is not None,
         "settings_file": str(settings_path.relative_to(project.dir)) if settings_path else None,
         "settings_sha256": receipts.sha256_text(json.dumps(settings, sort_keys=True)),
         "project_dir": str(project.dir), "scene_id": project.scene.id, "scene_units": project.scene.units, "unit_factor_to_m": r.factor,

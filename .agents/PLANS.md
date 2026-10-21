@@ -7,7 +7,7 @@ CAD geometry and structured procedures, using open-source tools. First deliver
 one useful small example as HTML and PDF, then process the enclosure's accepted
 STEP/assembly exports when available.
 
-## Current checkpoint — 2026-10-21 (first implementation session)
+## Current checkpoint — 2026-10-21 (first implementation session, Cycles follow-up)
 
 - [x] Record scope, requirements, architecture and incoming-agent instructions.
 - [x] Review reusable joystick atlas/PDF code and shared PCB tooling (docs/reuse.md).
@@ -33,12 +33,15 @@ STEP/assembly exports when available.
   nested groups, a station rotated 90°, six occurrences, a two-part step). It
   caught an asset-vs-scene unit bug in the render stage, now fixed and unit-tested.
 - [x] Both fixtures build end to end with `tools/build-fixture.sh`; all checks pass.
+- [x] Pixi `render` environment with the official `bpy` 4.5.14 wheel (`pixi.toml`,
+  `pixi.lock`, linux-64): OpenImageDenoise verified by assignment. Cycles is now
+  the default engine; the Guix Blender route stays on EEVEE (no denoiser there).
+  Shadow-catcher floor only on thumbnails and the overview (it quadruples a
+  Cycles view's time). Both fixtures rebuilt with Cycles; all checks pass.
 - [ ] Coordinate the production export contract with the CAD/Windows agent
-  (request posted; see docs/input-contract.md "Exporter fields requested").
+  (request posted; Linux sent Windows a matching request on 2026-10-21T18:31Z).
 - [ ] Validate an accepted enclosure subassembly; retain the joystick example as a
   second consumer/regression for the extracted rendering behaviour.
-- [ ] Pixi render environment with the `bpy` wheel if denoised Cycles images are
-  wanted; Guix Blender has no OpenImageDenoise.
 - [ ] MkDocs site assembly and the narrative Pandoc/Typst builder for prose chapters.
 - [ ] Close-up views, moves/removals, tools and checkpoints in the instruction model.
 
@@ -65,21 +68,26 @@ STEP/assembly exports when available.
   requires no proprietary CAD software.
 - Draft-1 is an illustrative contract; stable identities and explicit units/frames
   take priority over compatibility by guessing. `approach.end_offset` must be zero.
-- EEVEE Next is the default engine for flat instruction illustration; Cycles
-  remains selectable and records its missing denoiser.
+- Cycles with OpenImageDenoise is the reference look and the default engine
+  (Peter's expectation; matches the joystick atlas). EEVEE Next is for previews
+  and for the Guix Blender, which lacks the denoiser; receipts record both.
 - Track compact inputs; large generated outputs stay in `build/` or the evidence share.
 - Native CAD acceptance, stock counts and the real assembly order remain the
   project team's; the fixtures prove tooling, not an enclosure procedure.
 
 ## Verification and handoff
 
-Observed on 2026-10-21 (Debian 13 host, Guix 1.5.0): Python 3.12.12, PyYAML 6.0.3,
-pytest 9.0.2 (59 passed), FreeCAD 1.1.3, Blender 4.5.10 (no denoiser), Typst
-0.15.0, Poppler 22.09, ImageMagick 6.9.13. Three-part fixture: 8 views in 5.5 s,
-6-page PDF, 16 checks passed; two-bases fixture: 10 views in 6.8 s, 8-page PDF,
-16 checks passed. Representative PNGs, PDF pages and a headless-Chromium
-screenshot of the HTML were inspected by eye; greyscale copies remain legible.
-Not run: a real browser print test, Cycles image quality comparison, any
-production geometry, any physical build. Evidence and the mailbox reply are
+Observed on 2026-10-21 (Debian 13 host, Guix 1.5.0, Pixi 0.63.2): Python 3.12.12,
+PyYAML 6.0.3, pytest 9.0.2 (59 passed), FreeCAD 1.1.3, Blender 4.5.10 from Guix
+(no denoiser) and bpy 4.5.14 from PyPI (OpenImageDenoise), Typst 0.15.0, Poppler
+22.09, ImageMagick 6.9.13. Cycles, 64 adaptive samples, 1600 px: three-part
+fixture 8 views in 132 s (steps about 11 s, overview with floor 54 s), 6-page
+PDF, 16 checks passed; two-bases fixture 10 views in 150 s, 8-page PDF, 16 checks
+passed. EEVEE on the Guix Blender renders the same views in under a second each.
+Cycles and EEVEE images were compared by eye (contact shadows and shading differ;
+layout, outlines and arrows identical); PDF pages and a headless-Chromium
+screenshot of the HTML were inspected; greyscale copies remain legible.
+Not run: a real browser print test, any production geometry, any physical build.
+Inside a Guix shell Pixi needs `CONDA_OVERRIDE_GLIBC` set to the host glibc. Evidence and the mailbox reply are
 under the shared coordination area named in the ignored local handoff. No
 commits, pushes or publication were made.

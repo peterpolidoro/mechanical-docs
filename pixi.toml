@@ -1,0 +1,44 @@
+# Pixi environments for machines without Guix, and for the one tool Guix cannot
+# supply with its denoiser: Blender as the official `bpy` wheel (Blender 4.5 as a
+# Python module, with Cycles and OpenImageDenoise). The Guix roles in
+# manifest.scm and .guix/ remain the reference for the other stages; FreeCAD is
+# not in Pixi here. Only linux-64 has been verified.
+[workspace]
+name = "mechanical-docs"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+# pixi fetches a conda-to-PyPI name map before solving PyPI dependencies; the
+# empty local map skips that download, which fails on some networks, and is
+# correct here because nothing in the render environment is on both sides.
+conda-pypi-map = { "conda-forge" = "tools/empty-conda-pypi-map.json" }
+
+# The bpy wheel is manylinux_2_28. Inside a Guix shell pixi cannot detect the
+# host's glibc (it sees Guix's), so install/run with the host version declared,
+# e.g. CONDA_OVERRIDE_GLIBC=2.41 on Debian 13; outside Guix nothing is needed.
+[system-requirements]
+libc = { family = "glibc", version = "2.28" }
+
+[dependencies]
+python = ">=3.11,<3.14"
+pyyaml = ">=6"
+pytest = ">=8"
+
+[tasks]
+test = { cmd = "python -B -m pytest -q tests", description = "The pure-Python test suite" }
+inspect = { cmd = "python -B -m mechanical_docs inspect", description = "Validate a project: pixi run inspect examples/three-part-fixture" }
+manual = { cmd = "python -B -m mechanical_docs manual", description = "Build manual.json/HTML/Typst (PDF needs typst on PATH): pixi run manual PROJECT --renders DIR --out DIR" }
+check = { cmd = "python -B -m mechanical_docs check", description = "Check a built manual (PDF checks need Poppler on PATH)" }
+
+[feature.render.dependencies]
+python = "3.11.*"          # the bpy wheels are built for 3.11
+
+[feature.render.pypi-dependencies]
+bpy = ">=4.5,<4.6"
+
+[feature.render.tasks]
+render = { cmd = "python mechanical_docs/render.py", description = "Render a project with the bpy wheel: pixi run render PROJECT MESHES_JSON OUT_DIR [--preview] [--engine E]" }
+render-fixtures = { cmd = "python mechanical_docs/render.py examples/three-part-fixture build/three-part-fixture/meshes/meshes.json build/three-part-fixture/renders && python mechanical_docs/render.py examples/two-bases-fixture build/two-bases-fixture/meshes/meshes.json build/two-bases-fixture/renders", description = "Full-quality renders of both fixtures (meshes from the FreeCAD stage must exist)" }
+bpy-info = { cmd = "python tools/bpy_info.py", description = "Report the Blender version and whether this wheel's Cycles has OpenImageDenoise" }
+
+[environments]
+render = { features = ["render"], no-default-feature = true }
