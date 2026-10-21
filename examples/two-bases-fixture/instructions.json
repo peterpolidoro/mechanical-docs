@@ -1,0 +1,112 @@
+{
+  "schema_version": "draft-1",
+  "scene": "scene.json",
+  "id": "two-bases-fixture-assembly",
+  "title": "Two-station synthetic demonstration",
+  "review_state": "draft",
+  "views": [
+    {
+      "id": "overview",
+      "projection": "orthographic",
+      "eye": [
+        28,
+        -26,
+        20
+      ],
+      "target": [
+        6,
+        0,
+        1
+      ],
+      "up": [
+        0,
+        0,
+        1
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "id": "place-base-a",
+      "requires": [],
+      "add": [
+        "a-base"
+      ],
+      "view": "overview",
+      "caption": "Place the first base plate."
+    },
+    {
+      "id": "insert-pins-a",
+      "requires": [
+        "place-base-a"
+      ],
+      "add": [
+        "a-pin-1",
+        "a-pin-2"
+      ],
+      "view": "overview",
+      "caption": "Insert both pins of the first station."
+    },
+    {
+      "id": "place-base-b",
+      "requires": [
+        "place-base-a"
+      ],
+      "add": [
+        "b-base"
+      ],
+      "view": "overview",
+      "caption": "Place the second base plate, turned a quarter turn."
+    },
+    {
+      "id": "insert-pin-b1",
+      "requires": [
+        "place-base-b"
+      ],
+      "add": [
+        "b-pin-1"
+      ],
+      "view": "overview",
+      "caption": "Insert the first pin of the second station from above.",
+      "approach": {
+        "occurrence_id": "b-pin-1",
+        "start_offset": [
+          0,
+          0,
+          4
+        ],
+        "end_offset": [
+          0,
+          0,
+          0
+        ],
+        "validation": "unverified-render-hint"
+      }
+    },
+    {
+      "id": "insert-pin-b2",
+      "requires": [
+        "insert-pin-b1"
+      ],
+      "add": [
+        "b-pin-2"
+      ],
+      "view": "overview",
+      "caption": "Insert the second pin of the second station from above.",
+      "approach": {
+        "occurrence_id": "b-pin-2",
+        "start_offset": [
+          0,
+          0,
+          4
+        ],
+        "end_offset": [
+          0,
+          0,
+          0
+        ],
+        "validation": "unverified-render-hint"
+      }
+    }
+  ]
+}

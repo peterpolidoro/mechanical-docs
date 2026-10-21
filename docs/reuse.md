@@ -110,3 +110,32 @@ metadata, so byte equality alone is not a meaningful image-quality check.
 rendering/publishing code from these projects, while the first new feature remains
 a small visual assembly manual. No repository migration or publication occurred
 as part of this review.
+
+## Extracted in the first implementation session (2026-10-21)
+
+Adapted into `mechanical_docs/render.py` and `render_settings.py` from
+`mouse-joysticks-mech` at `22aa7544` (`atlas/render.py`, `atlas/scene.yaml`):
+the three-area-light studio scaled to the subject's bounding sphere, the look
+palette and Principled BSDF mapping, the Freestyle subject/context line sets
+with flat emissive context silhouettes, the projection-based camera fitting
+loop, the `matrix_basis` restore after a displaced view, and projected
+occurrence boxes for overlays. Deliberately not carried over: station roots
+and left/right inference from position, board placement, the model-size scale
+guess, explode chains along station axes, and the ghost ray casting (not
+needed while previous parts are drawn as silhouettes; revisit for occluded
+subjects). Every vector now comes from the scene manifest in declared units;
+the renderer has no fixture-specific names.
+
+Not reused yet: `manual/build.py` (the manifest-driven Markdown→Pandoc→Typst
+narrative builder). The step pages needed an image-led layout, so `typst.py`
+writes Typst directly from `manual.json`, following `manual/header.typ`'s
+breakable-figure rule. The narrative builder is still the right starting point
+for prose chapters and the sources appendix when a project needs them.
+`atlas/overlay.py`'s clickable SVG became the overview callouts in `html.py`
+(web-only, hidden in print). MkDocs site assembly was not started: the manual
+is one static page; the atlas `mkdocs.yml` and PCB hooks remain the templates.
+
+Attribution: the adapted code is by Peter Polidoro in `mouse-joysticks-mech`,
+whose `LICENSE` covers the mechanical design files (CC-BY-SA-4.0) and does not
+state a licence for the scripts. This repository has no licence file yet; the
+choice for both is Peter's and was not made here.

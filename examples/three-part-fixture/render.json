@@ -1,0 +1,8 @@
+{
+  "schema_version": "draft-1",
+  "note": "Illustration settings only: looks and image sizes. Nothing here changes geometry, identity, quantities or order.",
+  "looks": {
+    "base": "aluminium",
+    "pin": "blue-anodized"
+  }
+}

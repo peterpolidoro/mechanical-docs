@@ -7,62 +7,79 @@ CAD geometry and structured procedures, using open-source tools. First deliver
 one useful small example as HTML and PDF, then process the enclosure's accepted
 STEP/assembly exports when available.
 
-## Current checkpoint — 2026-10-21
+## Current checkpoint — 2026-10-21 (first implementation session)
 
 - [x] Record scope, requirements, architecture and incoming-agent instructions.
-- [x] Review reusable joystick atlas/PDF code and shared PCB tooling; record
-  source commits, assumptions and extraction boundaries in docs/reuse.md.
-- [x] Define a clearly marked draft input contract with separate part assets,
-  occurrence transforms, instructions and inventory.
-- [x] Generate/check the synthetic two-part/three-occurrence STEP fixture.
-  FreeCAD 1.1.3 exported/reimported two valid solids with expected dimensions and
-  volumes; nested pin positions are -25/+25 mm and final base/pin overlap is zero.
-  Required quantities and the three sample additions reconcile. Receipt:
-  `examples/three-part-fixture/geometry-validation.json`.
-- [ ] Implement a real import/inspect command and useful schema/identity checks.
-- [ ] Produce a visual inventory and three rendered steps for that fixture.
-- [ ] Build matching local HTML and PDF; inspect images, links and page breaks.
-- [ ] Coordinate the production export contract with the CAD/Windows agent.
-- [ ] Validate an accepted enclosure subassembly and retain the joystick example
-  as a second consumer/regression case for extracted shared rendering behavior.
+- [x] Review reusable joystick atlas/PDF code and shared PCB tooling (docs/reuse.md).
+- [x] Define the draft-1 input contract; implement exactly its milestone subset with
+  explicit rejection of everything else (`mechanical_docs/manifest.py`, 59 pytest
+  tests across manifest, transforms, procedure, GLB, geometry, settings, document).
+- [x] Synthetic three-part fixture generated and geometry-checked (FreeCAD 1.1.3).
+- [x] `inspect` command: validated parts, occurrences with resolved world transforms
+  (pins at X = −25/+25 mm under the +10 mm parent), steps with cumulative state,
+  inventory reconciliation, input hashes.
+- [x] CAD stage `cad_mesh.py` (FreeCADCmd): STEP validity, bounds, volume; per-face
+  tessellation; winding by signed volume; mesh volume within 0.13 % of the B-rep;
+  one GLB per part in metres/+Y up with the conversion recorded; `meshes.json`.
+- [x] Render stage `render.py` (Blender 4.5.10, EEVEE Next): part thumbnails,
+  overview, step and result images with subdued previous parts, highlighted
+  additions, approach arrows, one fixed orthographic camera per procedure;
+  hotspots; mesh-bounds and pose-restoration checks in `render-receipt.json`.
+- [x] Document stage: `manual.json` → static HTML (web-only callouts and count
+  inputs, print rules) and Typst → PDF (one page per step); build receipt.
+- [x] `check` command: HTML/PDF/manual.json agreement (inventory, quantities, step
+  order, review state), link/image resolution, page rasters, greyscale copies.
+- [x] Second scene `examples/two-bases-fixture` (centimetre scene, millimetre assets,
+  nested groups, a station rotated 90°, six occurrences, a two-part step). It
+  caught an asset-vs-scene unit bug in the render stage, now fixed and unit-tested.
+- [x] Both fixtures build end to end with `tools/build-fixture.sh`; all checks pass.
+- [ ] Coordinate the production export contract with the CAD/Windows agent
+  (request posted; see docs/input-contract.md "Exporter fields requested").
+- [ ] Validate an accepted enclosure subassembly; retain the joystick example as a
+  second consumer/regression for the extracted rendering behaviour.
+- [ ] Pixi render environment with the `bpy` wheel if denoised Cycles images are
+  wanted; Guix Blender has no OpenImageDenoise.
+- [ ] MkDocs site assembly and the narrative Pandoc/Typst builder for prose chapters.
+- [ ] Close-up views, moves/removals, tools and checkpoints in the instruction model.
 
-## First implementation sequence
+## Next implementation sequence
 
-1. Read the handoff and original sources. Propose the smallest concrete commands
-   and any draft-contract changes; communicate exporter needs through the mailbox.
-2. Validate fixture paths/hashes, identities, hierarchy and units. Import STEP in
-   FreeCAD/OCCT, check geometry and emit render meshes with occurrence mappings.
-3. Extract a small configurable part of the existing Blender renderer. Produce
-   part thumbnails and three cumulative steps with consistent cameras, highlights,
-   approach arrows and per-step part quantities. Add focused regressions for the
-   data and geometry behaviors being introduced.
-4. Reuse the Pandoc/Typst publishing pipeline and MkDocs/site patterns. Generate
-   the web and PDF views from the same step data. Keep interactive viewing optional.
-5. Test a second scene, including nested/repeated parts and explicit scale/frame
-   conversion. Review representative renders and print pagination. Report actual
-   versions, hashes, commands and remaining limitations.
-6. Obtain a complete accepted production scene and explicit procedure decisions;
-   validate on a physical build before claiming a final assembly manual.
+1. Read the Windows reply to the exporter field request; adapt `scene.json`
+   production fields (identity, Vault ids, BOM classification) without guessing.
+2. Load a small real subassembly from per-part STEP once exported; expect
+   contract changes (configurations, phantom assemblies, purchased kits).
+3. Add close-ups (per-step view override), a camera per subassembly, and the
+   static fallback for interactive extras in a MkDocs page.
+4. Reproduce one or two joystick atlas views through the generic renderer as a
+   regression; decide where shared materials live (kicad-libs overlap).
+5. Review printed pages with a technician; add the physical-validation record
+   fields before any manual claims more than `draft`.
 
 ## Decisions and boundaries
 
 - A broad repository name with assembly manuals as the first feature.
 - Reuse existing renderer, overlays and PDF code gradually; no wholesale move of
-  project scripts or large assets. Existing source projects remain operational.
-- Keep KiCad and Autodesk adapters separate. Linux documentation generation must
-  not require proprietary CAD software at render/publish time.
-- Draft-1 is an illustrative contract, not a frozen API. Stable identities and
-  explicit coordinate conventions take priority over compatibility by guessing.
-- Track compact inputs; large generated outputs go outside ordinary Git history.
-- Native production CAD acceptance, inventory counts and actual assembly order
-  remain the project team's responsibilities, supported by tooling evidence.
+  project scripts or large assets. Existing source projects remain operational
+  and untouched (joystick checkout still at 22aa7544, clean).
+- Keep KiCad and Autodesk adapters separate. Linux documentation generation
+  requires no proprietary CAD software.
+- Draft-1 is an illustrative contract; stable identities and explicit units/frames
+  take priority over compatibility by guessing. `approach.end_offset` must be zero.
+- EEVEE Next is the default engine for flat instruction illustration; Cycles
+  remains selectable and records its missing denoiser.
+- Track compact inputs; large generated outputs stay in `build/` or the evidence share.
+- Native CAD acceptance, stock counts and the real assembly order remain the
+  project team's; the fixtures prove tooling, not an enclosure procedure.
 
 ## Verification and handoff
 
-Fixture geometry checks passed as recorded above. The base Guix environment
-was verified with Python 3.12.12, PyYAML 6.0.3 and Git. Local documentation links,
-JSON parsing and fixture/asset receipt hashes were checked. Renderer, site, PDF,
-general validation and production assembly checks have not been implemented/run.
-The next agent should update this plan as it works and report via the shared
-coordination area described in the ignored local handoff. No extra agent starts
-automatically and no commits, pushes or publication are part of this scaffold.
+Observed on 2026-10-21 (Debian 13 host, Guix 1.5.0): Python 3.12.12, PyYAML 6.0.3,
+pytest 9.0.2 (59 passed), FreeCAD 1.1.3, Blender 4.5.10 (no denoiser), Typst
+0.15.0, Poppler 22.09, ImageMagick 6.9.13. Three-part fixture: 8 views in 5.5 s,
+6-page PDF, 16 checks passed; two-bases fixture: 10 views in 6.8 s, 8-page PDF,
+16 checks passed. Representative PNGs, PDF pages and a headless-Chromium
+screenshot of the HTML were inspected by eye; greyscale copies remain legible.
+Not run: a real browser print test, Cycles image quality comparison, any
+production geometry, any physical build. Evidence and the mailbox reply are
+under the shared coordination area named in the ignored local handoff. No
+commits, pushes or publication were made.

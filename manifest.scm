@@ -1,2 +1,3 @@
 (use-modules (guix profiles))
-(specifications->manifest '("python" "python-pyyaml" "git"))
+;; Base role: manifest validation, document generation and the test suite.
+(specifications->manifest '("python" "python-pyyaml" "python-pytest" "git"))

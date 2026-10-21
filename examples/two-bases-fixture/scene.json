@@ -1,0 +1,388 @@
+{
+  "schema_version": "draft-1",
+  "id": "two-bases-fixture",
+  "title": "Two synthetic stations, one rotated, in centimetres",
+  "units": "cm",
+  "coordinate_system": {
+    "handedness": "right",
+    "up_axis": "+Z",
+    "origin": "station A base bottom centre"
+  },
+  "source": {
+    "kind": "synthetic",
+    "generator": "hand-authored from the three-part fixture's assets",
+    "qualification": "fixture only"
+  },
+  "parts": [
+    {
+      "id": "base",
+      "name": "Base plate",
+      "asset": {
+        "path": "assets/base.step",
+        "format": "step",
+        "units": "mm",
+        "sha256": "582703b3995a3d3a455428ae252dece39009b24106b467254c4ec976b7187aaa"
+      },
+      "identifying_dimensions_mm": {
+        "width": 100,
+        "depth": 60,
+        "height": 8,
+        "hole_diameter": 10.5
+      }
+    },
+    {
+      "id": "pin",
+      "name": "Pin",
+      "asset": {
+        "path": "assets/pin.step",
+        "format": "step",
+        "units": "mm",
+        "sha256": "830d521aeae2e21164e8cdafa4a0ffec5ad6ed1254714207772f6a18d0995be4"
+      },
+      "identifying_dimensions_mm": {
+        "diameter": 10,
+        "length": 30
+      }
+    }
+  ],
+  "assemblies": [
+    {
+      "id": "root",
+      "parent_id": null,
+      "transform": [
+        [
+          1,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "station-a",
+      "parent_id": "root",
+      "transform": [
+        [
+          1,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "station-a-pins",
+      "parent_id": "station-a",
+      "transform": [
+        [
+          1,
+          0,
+          0,
+          1.0
+        ],
+        [
+          0,
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "station-b",
+      "parent_id": "root",
+      "transform": [
+        [
+          0.0,
+          -1.0,
+          0,
+          12.0
+        ],
+        [
+          1.0,
+          0.0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "station-b-pins",
+      "parent_id": "station-b",
+      "transform": [
+        [
+          1,
+          0,
+          0,
+          1.0
+        ],
+        [
+          0,
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ]
+    }
+  ],
+  "occurrences": [
+    {
+      "id": "a-base",
+      "part_id": "base",
+      "parent_id": "station-a",
+      "transform": [
+        [
+          1,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "a-pin-1",
+      "part_id": "pin",
+      "parent_id": "station-a-pins",
+      "transform": [
+        [
+          1,
+          0,
+          0,
+          -3.5
+        ],
+        [
+          0,
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "a-pin-2",
+      "part_id": "pin",
+      "parent_id": "station-a-pins",
+      "transform": [
+        [
+          1,
+          0,
+          0,
+          1.5
+        ],
+        [
+          0,
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "b-base",
+      "part_id": "base",
+      "parent_id": "station-b",
+      "transform": [
+        [
+          1,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "b-pin-1",
+      "part_id": "pin",
+      "parent_id": "station-b-pins",
+      "transform": [
+        [
+          1,
+          0,
+          0,
+          -3.5
+        ],
+        [
+          0,
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "b-pin-2",
+      "part_id": "pin",
+      "parent_id": "station-b-pins",
+      "transform": [
+        [
+          1,
+          0,
+          0,
+          1.5
+        ],
+        [
+          0,
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ]
+    }
+  ]
+}

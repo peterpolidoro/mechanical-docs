@@ -86,3 +86,78 @@ files, unknown/duplicate IDs, hierarchy cycles, bad transforms, wrong checksums,
 unsatisfied prerequisites, duplicate installation and quantity inconsistencies.
 Do not treat a matching input manifest as proof that every output file exists or
 is current; verify those separately before a manual release.
+
+## Implemented subset (2026-10-21)
+
+`mechanical_docs/manifest.py` implements exactly the fields above and rejects
+everything else with one combined error listing every problem. Accepted:
+
+| File | Fields |
+| --- | --- |
+| scene | `schema_version` (`draft-1`), `id`, `title`, `units` (mm, cm, m, in), `coordinate_system` (`handedness` must be `right`, `up_axis` must be `+Z`, `origin`), `source` (`kind`, `generator`, `qualification`, `revision`, `exporter`, `exported_at`), `parts[]` (`id`, `name`, `asset{path, format=step, units, sha256}`, `identifying_dimensions_mm`, `description`), `assemblies[]` (`id`, `parent_id`, `transform`, `name`), `occurrences[]` (`id`, `part_id`, `parent_id`, `transform`, `name`) |
+| instructions | `schema_version`, `scene`, `id`, `title`, `review_state` (draft, cad-reviewed, physically-validated), `views[]` (`id`, `projection`, `eye`, `target`, `up`), `steps[]` (`id`, `requires`, `add`, `view`, `caption`, `approach{occurrence_id, start_offset, end_offset, validation}`) |
+| inventory | `schema_version`, `scene`, `status`, `items[]` (`part_id`, `required`, `unit`, `counted`) |
+
+Rejected, each with a message naming the field: unknown fields, a wrong schema
+version, an absolute or root-escaping asset path, a missing file, a SHA-256
+mismatch, duplicate ids (assemblies and occurrences share one namespace),
+unknown parts/parents/views/occurrences, a hierarchy without exactly one root
+or with a cycle, a non-rigid transform (scale, shear, or a reflection: mirror
+a geometry variant explicitly instead), a prerequisite that is not an earlier
+step, an occurrence installed twice or never, an assembly group listed as an
+installed part, an approach hint for an occurrence the step does not add, a
+non-zero `end_offset`, a `validation` other than `unverified-render-hint`,
+an inventory `required` that differs from the installed occurrence count, and
+a part without an inventory row. Identifiers match `[A-Za-z0-9][A-Za-z0-9._-]*`.
+
+Unit handling: asset bounds and meshes are in the asset's declared units; the
+scene's transforms, camera coordinates and approach offsets are in the scene's
+units. Each is converted to metres with its own factor exactly once
+(`geometry.py`), and the render stage checks the imported mesh bounds against
+the CAD stage's record so a double or missing conversion fails loudly. The
+`examples/two-bases-fixture` scene (centimetres, millimetre assets, a station
+rotated 90°) exercises this.
+
+### Illustration settings (`render.json`, optional)
+
+Per project, beside the manifests. Only appearance: `looks` (part id → palette
+name), `palette` additions, `engine`, `samples`, image sizes, `aspect`, `fill`,
+outline and arrow styling. Unknown fields and unknown look names are rejected.
+It cannot change geometry, identity, quantities or order.
+
+### Stage outputs
+
+| File | Written by | Content |
+| --- | --- | --- |
+| `inspect.json` | `python3 -m mechanical_docs inspect` | validated parts, occurrences with world transforms, steps with cumulative state, inventory reconciliation, input hashes |
+| `meshes/<part>.glb`, `meshes/meshes.json` | `cad_mesh.py` (FreeCADCmd) | one GLB per part (metres, +Y up, conversion recorded in the asset extras), STEP validity/bounds/volume, mesh winding and volume checks, hashes |
+| `renders/*.png`, `renders/hotspots/*.json`, `renders/render-receipt.json` | `render.py` (Blender) | thumbnails, overview, step and result images; projected occurrence boxes; versions, engine, denoiser, settings hash, per-view hashes, mesh-bounds and pose-restoration checks |
+| `manual/manual.json`, `index.html`, `manual.typ`, `<id>.pdf`, `build-receipt.json` | `python3 -m mechanical_docs manual` | the single document model and both outputs generated from it |
+| `manual/check-report.json`, `manual/checks/` | `python3 -m mechanical_docs check` | HTML/PDF/manual.json agreement, link and image resolution, page rasters and greyscale copies |
+
+Each stage refuses inputs whose hashes differ from the receipt it consumes, and
+refuses receipts that report failed checks or partial renders.
+
+## Exporter fields requested from the Windows adapter
+
+The Windows pilot's `placement-report.json` already carries occurrence names,
+document paths and hashes, grounded/suppressed/visible flags and row-major 4×4
+matrices in centimetres. To feed this contract without guessing, the per-part
+STEP plus manifest export should add:
+
+1. A stable occurrence identity that survives a refresh (the Inventor
+   occurrence's persistent reference key or at least the full occurrence path),
+   with the document's Vault master/version ids and native SHA-256.
+2. A part key per distinct document + model state (+ mirror/configuration
+   variant), the STEP exported for that key, its SHA-256 and units.
+3. The parent occurrence for every occurrence, so nested subassemblies and
+   their transforms are preserved rather than flattened; a statement of whether
+   each matrix is parent-relative or root-relative and column- or row-vector.
+4. Native BOM structure (structured/phantom/purchased/reference), quantity
+   fields, suppressed and reference-only flags, and unit of measure, kept raw.
+5. Part number, description, material and any fastener specification where the
+   iProperties actually have them; `null` where they do not.
+
+Grounding, constraints and surface-body counts are useful evidence but are not
+part of the documentation contract. Until these fields exist, the synthetic
+fixtures stand in; nothing in the pilot's export has been loaded as a project.

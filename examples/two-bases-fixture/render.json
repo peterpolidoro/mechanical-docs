@@ -1,0 +1,7 @@
+{
+  "schema_version": "draft-1",
+  "looks": {
+    "base": "grey-plastic",
+    "pin": "red-plastic"
+  }
+}

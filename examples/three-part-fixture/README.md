@@ -22,6 +22,7 @@ tolerances and a physical build are not qualified.
 | `scene.json` | Generated draft part/occurrence hierarchy and input hashes |
 | `instructions.json` | Hand-authored three-step example and camera |
 | `inventory.json` | Hand-authored required quantities; actual counts unknown |
+| `render.json` | Illustration settings only (looks); see docs/input-contract.md |
 | `geometry-validation.json` | Generated FreeCAD export/reimport and placement checks |
 
 From the repository root:
@@ -35,8 +36,15 @@ hand-authored fixture quantities/step IDs against the known scene, but does not
 implement the generic validation library. Later renderer output should go under
 an ignored directory such as `build/three-part-fixture/`.
 
-The desired first manual shows a pictured inventory, placement of the base,
-insertion of pin A, and insertion of pin B. Previously installed parts are subdued,
-the added part is highlighted, and arrows show the intended downward approach.
-The published captions may be shorter than the authoring captions. Use identical
-step content for web and PDF.
+The manual shows a pictured inventory, placement of the base, insertion of
+pin A, and insertion of pin B. Previously installed parts are subdued, the added
+part is highlighted, and arrows show the intended downward approach. Web and PDF
+are generated from one `manual.json` and checked against each other.
+
+```sh
+tools/build-fixture.sh                 # -> build/three-part-fixture/{inspect.json,meshes,renders,manual}
+tools/build-fixture.sh . --preview     # small, fast images into renders-preview/ and manual-preview/
+```
+
+`build/` is ignored by Git. Representative outputs and receipts from the first
+build are kept in the shared evidence area named in the local handoff.
