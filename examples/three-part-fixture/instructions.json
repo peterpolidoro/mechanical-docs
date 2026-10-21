@@ -1,0 +1,51 @@
+{
+  "schema_version": "draft-1",
+  "scene": "scene.json",
+  "id": "three-part-fixture-assembly",
+  "title": "Synthetic assembly demonstration",
+  "review_state": "draft",
+  "views": [
+    {
+      "id": "overview",
+      "projection": "orthographic",
+      "eye": [160, -180, 150],
+      "target": [0, 0, 10],
+      "up": [0, 0, 1]
+    }
+  ],
+  "steps": [
+    {
+      "id": "place-base",
+      "requires": [],
+      "add": ["base-1"],
+      "view": "overview",
+      "caption": "Place the base with its two holes facing upward."
+    },
+    {
+      "id": "insert-pin-a",
+      "requires": ["place-base"],
+      "add": ["pin-a"],
+      "view": "overview",
+      "caption": "Insert the first pin from above.",
+      "approach": {
+        "occurrence_id": "pin-a",
+        "start_offset": [0, 0, 40],
+        "end_offset": [0, 0, 0],
+        "validation": "unverified-render-hint"
+      }
+    },
+    {
+      "id": "insert-pin-b",
+      "requires": ["insert-pin-a"],
+      "add": ["pin-b"],
+      "view": "overview",
+      "caption": "Insert the second pin from above.",
+      "approach": {
+        "occurrence_id": "pin-b",
+        "start_offset": [0, 0, 40],
+        "end_offset": [0, 0, 0],
+        "validation": "unverified-render-hint"
+      }
+    }
+  ]
+}

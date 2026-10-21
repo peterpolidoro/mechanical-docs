@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "kind": "synthetic-fixture-geometry-receipt",
+  "freecad_version": [
+    "1",
+    "1",
+    "3"
+  ],
+  "geometry": {
+    "base": {
+      "path": "assets/base.step",
+      "sha256": "582703b3995a3d3a455428ae252dece39009b24106b467254c4ec976b7187aaa",
+      "bytes": 9911,
+      "valid": true,
+      "solids": 1,
+      "extent_mm": [
+        100.0,
+        60.0,
+        8.0
+      ],
+      "volume_mm3": 46614.55763976689
+    },
+    "pin": {
+      "path": "assets/pin.step",
+      "sha256": "830d521aeae2e21164e8cdafa4a0ffec5ad6ed1254714207772f6a18d0995be4",
+      "bytes": 3522,
+      "valid": true,
+      "solids": 1,
+      "extent_mm": [
+        10.0,
+        10.0,
+        30.0
+      ],
+      "volume_mm3": 2356.194490192345
+    }
+  },
+  "part_types": 2,
+  "occurrences": 3,
+  "pin_world_x_mm": [
+    -25,
+    25
+  ],
+  "base_pin_final_overlap_volumes_mm3": [
+    0.0,
+    0.0
+  ],
+  "known_fixture_inventory_and_step_reconciliation": "passed",
+  "files": {
+    "generate_fixture.py": "9630370861a9754e9c795d8d0d5f3b63f67b965a059d9bc16853ba1a90c8320a",
+    "scene.json": "956e79f9f18a358ef1e9c97fd58add69e5f620498fdf13db001af00c7746b3ca",
+    "instructions.json": "046a1f4fe20bf2e40f12a865c835877e25834e551706da37e35f8e8d22191208",
+    "inventory.json": "d16f03ea2e2b8393c58dab7cd56d3c8c182e8d4da19978bb119f6b38088c073e"
+  },
+  "physical_assembly_validated": false,
+  "not_run": [
+    "continuous insertion-path checks",
+    "tool access",
+    "rendering",
+    "HTML/PDF generation",
+    "production CAD checks"
+  ]
+}

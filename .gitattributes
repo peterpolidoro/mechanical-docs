@@ -1,0 +1,10 @@
+* text=auto
+*.md text eol=lf
+*.json text eol=lf
+*.py text eol=lf
+*.scm text eol=lf
+*.step binary
+*.stp binary
+*.FCStd binary
+*.glb binary
+*.blend binary

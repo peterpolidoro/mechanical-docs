@@ -1,0 +1,9 @@
+{
+  "schema_version": "draft-1",
+  "scene": "scene.json",
+  "status": "synthetic required quantities; physical stock not counted",
+  "items": [
+    {"part_id": "base", "required": 1, "unit": "each", "counted": null},
+    {"part_id": "pin", "required": 2, "unit": "each", "counted": null}
+  ]
+}

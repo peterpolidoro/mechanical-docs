@@ -1,0 +1,205 @@
+{
+  "schema_version": "draft-1",
+  "id": "three-part-fixture",
+  "title": "Synthetic base and two pins",
+  "units": "mm",
+  "coordinate_system": {
+    "handedness": "right",
+    "up_axis": "+Z",
+    "origin": "base bottom center"
+  },
+  "source": {
+    "kind": "synthetic",
+    "generator": "generate_fixture.py",
+    "qualification": "fixture only"
+  },
+  "parts": [
+    {
+      "id": "base",
+      "name": "Base",
+      "asset": {
+        "path": "assets/base.step",
+        "format": "step",
+        "units": "mm",
+        "sha256": "582703b3995a3d3a455428ae252dece39009b24106b467254c4ec976b7187aaa"
+      },
+      "identifying_dimensions_mm": {
+        "width": 100,
+        "depth": 60,
+        "height": 8,
+        "hole_diameter": 10.5
+      }
+    },
+    {
+      "id": "pin",
+      "name": "Pin",
+      "asset": {
+        "path": "assets/pin.step",
+        "format": "step",
+        "units": "mm",
+        "sha256": "830d521aeae2e21164e8cdafa4a0ffec5ad6ed1254714207772f6a18d0995be4"
+      },
+      "identifying_dimensions_mm": {
+        "diameter": 10,
+        "length": 30
+      }
+    }
+  ],
+  "assemblies": [
+    {
+      "id": "root",
+      "parent_id": null,
+      "transform": [
+        [
+          1,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "pin-pair",
+      "parent_id": "root",
+      "transform": [
+        [
+          1,
+          0,
+          0,
+          10
+        ],
+        [
+          0,
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ]
+    }
+  ],
+  "occurrences": [
+    {
+      "id": "base-1",
+      "part_id": "base",
+      "parent_id": "root",
+      "transform": [
+        [
+          1,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "pin-a",
+      "part_id": "pin",
+      "parent_id": "pin-pair",
+      "transform": [
+        [
+          1,
+          0,
+          0,
+          -35
+        ],
+        [
+          0,
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "pin-b",
+      "part_id": "pin",
+      "parent_id": "pin-pair",
+      "transform": [
+        [
+          1,
+          0,
+          0,
+          15
+        ],
+        [
+          0,
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+.agents/handoff.local.md
+.cache/
+.pixi/
+.venv/
+__pycache__/
+*.py[cod]
+.env
+build/
+dist/
+site/
+tmp/
+*.FCStd1
+*.FCBak
+*.blend1
+*.blend2
