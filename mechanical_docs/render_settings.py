@@ -42,7 +42,7 @@ DEFAULTS = {
     # The catcher costs Cycles a second full pass (about 4x the view time), so by
     # default only the part thumbnails and the overview get it; add "step" and
     # "step-result" to `views` for the step images too.
-    "floor": {"enabled": "auto", "views": ["part-thumbnail", "overview", "group"], "color": [0.46, 0.47, 0.49], "roughness": 0.9, "size_factor": 40},
+    "floor": {"enabled": "auto", "views": ["part-thumbnail", "overview", "group", "joint"], "color": [0.46, 0.47, 0.49], "roughness": 0.9, "size_factor": 40},
     "long_side_px": 1600,
     "preview_long_side_px": 480,
     "thumbnail_px": 600,
@@ -64,6 +64,17 @@ DEFAULTS = {
     "inspection_groups": [],
     "group_direction": [1.0, -1.2, 0.8],
     "group_fill": 0.84,
+    # Per-joint close-ups: each entry names a project joint id and the specific
+    # occurrences that form the joint; they are framed alone at their canonical
+    # poses while the rest of the context assembly (default: their deepest common
+    # ancestor) is drawn faded or hidden. Inspection views, not steps.
+    #   {"joint_id": "caster_to_plate", "occurrence_ids": ["…/CASTER:1", "…/PLATE:1"],
+    #    "direction": [1, -1.2, 0.8], "context": "FREE STANDING FRAME:1/CASTER ASSEMBLY:1",
+    #    "context_style": "faded", "id": "caster_to_plate-1"}
+    "joint_views": [],
+    "joint_direction": [1.0, -1.2, 0.8],
+    "joint_fill": 0.80,
+    "joint_context_style": "faded",
     "overview_direction": [1.0, -1.2, 0.8],   # used when a project has no instructions (inventory only)
     "film_transparent": True,
     "view_transform": "Standard",
@@ -96,12 +107,55 @@ DEFAULTS = {
 # render.json may set these top-level keys; palette entries may be added, not the whole palette replaced.
 OVERRIDABLE = {"engine", "samples", "preview_samples", "cycles_samples", "cycles_preview_samples", "cycles_adaptive_threshold", "cycles_max_bounces", "cycles_persistent_data", "floor", "long_side_px", "preview_long_side_px", "thumbnail_px", "aspect", "fill",
                "thumbnail_fill", "thumbnail_direction", "thumbnail_long_aspect", "thumbnail_long_px", "thumbnail_long_aspect_px", "thumbnail_long_direction", "thumbnail_end_view",
-               "inspection_groups", "group_direction", "group_fill", "overview_direction", "film_transparent", "view_transform", "look", "exposure", "world", "studio",
+               "inspection_groups", "group_direction", "group_fill", "joint_views", "joint_direction", "joint_fill", "joint_context_style", "overview_direction", "film_transparent", "view_transform", "look", "exposure", "world", "studio",
                "default_look", "looks", "context_color", "lines", "arrow", "palette", "note", "schema_version"}
+
+
+JOINT_VIEW_FIELDS = {"id", "joint_id", "occurrence_ids", "direction", "context", "context_style"}
+JOINT_CONTEXT_STYLES = ("faded", "hidden")
 
 
 class SettingsError(ValueError):
     pass
+
+
+def _vec3(v):
+    return isinstance(v, list) and len(v) == 3 and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in v)
+
+
+def check_joint_views(views, context_style):
+    """Structural validation of `joint_views` (scene ids are checked by the
+    renderer, which has the scene). Returns the list with defaults filled."""
+    if not isinstance(views, list):
+        raise SettingsError("render.json: joint_views must be a list of objects")
+    out = []
+    for i, jv in enumerate(views):
+        where = f"render.json: joint_views[{i}]"
+        if not isinstance(jv, dict):
+            raise SettingsError(f"{where}: expected an object")
+        extra = sorted(set(jv) - JOINT_VIEW_FIELDS)
+        if extra:
+            raise SettingsError(f"{where}: unsupported field(s) {extra}; accepted {sorted(JOINT_VIEW_FIELDS)}")
+        jid = jv.get("joint_id")
+        if not isinstance(jid, str) or not jid.strip():
+            raise SettingsError(f"{where}.joint_id: expected a non-empty string")
+        occs = jv.get("occurrence_ids")
+        if not isinstance(occs, list) or not occs or any(not isinstance(o, str) for o in occs):
+            raise SettingsError(f"{where}.occurrence_ids: expected a non-empty list of occurrence ids")
+        if len(set(occs)) != len(occs):
+            raise SettingsError(f"{where}.occurrence_ids: an occurrence is listed twice")
+        if "direction" in jv and not _vec3(jv["direction"]):
+            raise SettingsError(f"{where}.direction: expected three numbers")
+        if "context" in jv and (not isinstance(jv["context"], str) or not jv["context"]):
+            raise SettingsError(f"{where}.context: expected an assembly id")
+        style = jv.get("context_style", context_style)
+        if style not in JOINT_CONTEXT_STYLES:
+            raise SettingsError(f"{where}.context_style: expected one of {JOINT_CONTEXT_STYLES}, got {style!r}")
+        if "id" in jv and (not isinstance(jv["id"], str) or not jv["id"].strip()):
+            raise SettingsError(f"{where}.id: expected a non-empty string")
+        out.append({"id": jv.get("id"), "joint_id": jid, "occurrence_ids": list(occs), "direction": jv.get("direction"),
+                    "context": jv.get("context"), "context_style": style})
+    return out
 
 
 def load_settings(project_dir):
@@ -129,6 +183,9 @@ def load_settings(project_dir):
         raise SettingsError("render.json: looks must map part id -> look name")
     if not isinstance(s["inspection_groups"], list) or any(not isinstance(x, str) for x in s["inspection_groups"]):
         raise SettingsError("render.json: inspection_groups must be a list of assembly ids")
+    if s["joint_context_style"] not in JOINT_CONTEXT_STYLES:
+        raise SettingsError(f"render.json: joint_context_style must be one of {JOINT_CONTEXT_STYLES}")
+    s["joint_views"] = check_joint_views(s["joint_views"], s["joint_context_style"])
     unknown = sorted(set(s["looks"].values()) - set(s["palette"]))
     if unknown:
         raise SettingsError(f"render.json: unknown look(s) {unknown}; palette has {sorted(s['palette'])}")

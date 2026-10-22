@@ -14,7 +14,7 @@ def test_fixture_loads_and_resolves_world_transforms(fixture_dir):
     assert T.translation(sc.occurrences["pin-b"].world) == [25, 0, 0]
     assert sc.occurrences["pin-a"].path == ["root", "pin-pair"]
     assert sc.assemblies["pin-pair"].depth == 1
-    assert len(pr.input_hashes()) == 5
+    assert len(pr.input_hashes()) == 6      # scene, instructions, inventory, supplement, two assets
     assert pr.inventory.items[1].counted is None
 
 
@@ -148,9 +148,9 @@ def test_inventory_missing_row_and_unknown_part(project_copy):
     assert "unknown part 'washer'" in p and "no row for part(s) ['base']" in p
 
 
-def test_inventory_counted_must_be_null_or_int(project_copy):
+def test_inventory_counted_is_not_data(project_copy):
     project_copy.edit("inventory.json", lambda d: d["items"][1].__setitem__("counted", "two"))
-    assert "counted: expected null or a non-negative integer" in _problems(project_copy)
+    assert "counted: the counted box is paper only and not a data field" in _problems(project_copy)
 
 
 def test_review_state_enum(project_copy):
@@ -203,6 +203,7 @@ def _production_scene(project_copy):
             o["transform_world"] = [[1, 0, 0, tx], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
     project_copy.edit("scene.json", f)
     (project_copy.dir / "instructions.json").unlink()
+    (project_copy.dir / "supplement.json").unlink()      # its scene ids are the fixture's, not the production-style ones
     inv = _json.loads((project_copy.dir / "inventory.json").read_text())
     for row in inv["items"]:
         row["part_id"] = "DATA\\COMMON\\" + row["part_id"] + ".ipt|[Primary]"
@@ -269,7 +270,7 @@ def test_inventory_template(fixture_dir):
     from mechanical_docs.manifest import inventory_template, load_scene
     sc = load_scene(fixture_dir / "scene.json")
     t = inventory_template(sc)
-    assert t["items"] == [{"part_id": "base", "required": 1, "unit": "each", "counted": None}, {"part_id": "pin", "required": 2, "unit": "each", "counted": None}]
+    assert t["items"] == [{"part_id": "base", "required": 1, "unit": "each"}, {"part_id": "pin", "required": 2, "unit": "each"}]
     assert "not a purchase list" in t["status"]
 
 
@@ -294,3 +295,13 @@ def test_coincident_occurrences_are_a_finding_not_an_error(project_copy):
 def FIXTURE_DIR_FOR_COINCIDENT():
     from pathlib import Path
     return Path(__file__).resolve().parents[1] / "examples" / "three-part-fixture"
+
+
+def test_render_input_hashes_exclude_inventory_and_supplement(fixture_dir):
+    """A stock record or a supplement row never changes an image, so --reuse compares only the rest."""
+    pr = load_project(fixture_dir)
+    assert set(pr.input_hashes()) - set(pr.render_input_hashes()) == {"inventory.json", "supplement.json"}
+    assert set(pr.render_input_hashes()) == {"scene.json", "instructions.json", "assets/base.step", "assets/pin.step"}
+    assert pr.non_render_inputs() == {"inventory.json", "supplement.json"}
+    # meshes depend on geometry only: scene and assets
+    assert set(pr.geometry_input_hashes()) == {"scene.json", "assets/base.step", "assets/pin.step"}

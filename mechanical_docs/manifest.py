@@ -1,4 +1,4 @@
-"""Load and validate a draft-1 project: scene.json, instructions.json, inventory.json.
+"""Load and validate a draft-1 project: scene.json, instructions.json, inventory.json, supplement.json.
 
 Only the fields the contract names are accepted; anything else is an error, so
 a producer cannot silently rely on unsupported data. Every problem found is
@@ -7,9 +7,19 @@ reported together in one ManifestError rather than one at a time.
 The validated result carries resolved world transforms in a +Z-up frame (a
 declared +Y-up scene is rotated once, at the root, by its `basis_to_z_up`),
 resolved asset paths and the SHA-256 of every input file.
+
+`supplement.json` (schema_version 1) is the optional list of items that are
+not modelled in CAD (hardware, consumables): candidate families or specified
+SKUs attached to joints and to scene assemblies/occurrences. Its quantities
+are integers or null (unknown); nothing is ever coerced to 0, and nothing in
+it is added to the scene's CAD counts. The inventory's optional stock fields
+(`on_hand_each` with `counted_by`/`counted_date`, `stock_location`,
+`intended_configuration_confirmed`) follow the same rules; the printed
+`counted` box is paper only and is not a data field.
 """
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import re
@@ -42,8 +52,21 @@ INSTRUCTION_FIELDS = {"schema_version", "scene", "id", "title", "review_state", 
 VIEW_FIELDS = {"id", "projection", "eye", "target", "up"}
 STEP_FIELDS = {"id", "requires", "add", "view", "caption", "approach"}
 APPROACH_FIELDS = {"occurrence_id", "start_offset", "end_offset", "validation"}
-INVENTORY_FIELDS = {"schema_version", "scene", "status", "items"}
-ITEM_FIELDS = {"part_id", "required", "unit", "counted"}
+INVENTORY_FIELDS = {"schema_version", "scene", "status", "items", "notes"}
+STOCK_FIELDS = {"on_hand_each", "counted_by", "counted_date", "stock_location", "intended_configuration_confirmed"}   # optional inventory extension
+ITEM_FIELDS = {"part_id", "required", "unit", "counted"} | STOCK_FIELDS
+# supplement.json: items not modelled in CAD (decided with the Linux CAD agent, 2026-10-22)
+SUPPLEMENT_SCHEMA_VERSION = 1
+SUPPLEMENT_FIELDS = {"schema_version", "scene", "status", "source", "items"}
+SUPPLEMENT_ITEM_FIELDS = ("item_id", "joint_id", "scope", "item_kind", "status", "candidate_item_family", "quantity_basis",
+                          "confirmed_required_each", "on_hand_each", "counted_by", "counted_date", "stock_location", "on_order_each",
+                          "included_with", "intended_configuration_confirmed", "attaches_to", "specification", "supplier_part_number",
+                          "supplier_specification_verified", "unit_cost", "currency", "evidence", "next_check")
+SUPPLEMENT_SCOPES = ("existing", "new_design")
+SUPPLEMENT_ITEM_KINDS = ("family", "sku")
+SUPPLEMENT_STATUSES = ("candidate_requires_review", "not_required", "covered", "specified")
+INCLUDED_WITH_KINDS = ("scene_part", "kit")
+INCLUDED_WITH_FIELDS = {"scene_part": {"kind", "id"}, "kit": {"kind", "name"}}
 SCALAR = (str, int, float, bool, type(None))
 
 
@@ -153,6 +176,27 @@ class Scene:
     def installed_occurrences_of(self, part_id):
         return [o for o in self.occurrences_of(part_id) if o.installed]
 
+    def assembly_path(self, aid):
+        """Assembly ids from the root down to `aid` (inclusive)."""
+        trail = []; cur = aid
+        while cur is not None and cur in self.assemblies and len(trail) <= len(self.assemblies):
+            trail.append(cur); cur = self.assemblies[cur].parent_id
+        return list(reversed(trail))
+
+    def under(self, ident, gid):
+        """True when `ident` (an assembly or occurrence id) is `gid` or lies under it."""
+        if ident == gid:
+            return True
+        if ident in self.occurrences:
+            return gid in self.occurrences[ident].path
+        if ident in self.assemblies:
+            return gid in self.assembly_path(ident)[:-1]
+        return False
+
+    def members(self, gid):
+        """Occurrence ids under the assembly (any depth), in scene order."""
+        return [oid for oid, occ in self.occurrences.items() if gid in occ.path]
+
 
 @dataclass
 class View:
@@ -197,7 +241,18 @@ class InventoryItem:
     part_id: str
     required: int
     unit: str
-    counted: int | None
+    # optional stock record (recipe-produced): the one stock authority is on_hand_each
+    on_hand_each: int | None = None
+    counted_by: str | None = None
+    counted_date: str | None = None
+    stock_location: str | None = None
+    intended_configuration_confirmed: bool | None = None   # required (explicit) when any stock field is present
+    extended: bool = False
+
+    @property
+    def counted(self):
+        """Compatibility: the deprecated `counted` field is never data (paper-only box)."""
+        return None
 
 
 @dataclass
@@ -206,6 +261,52 @@ class Inventory:
     items: list
     file: Path
     sha256: str
+    notes: list = field(default_factory=list)    # project-authored sentences printed on the status block
+
+
+@dataclass
+class SupplementItem:
+    item_id: str
+    joint_id: str
+    scope: str
+    item_kind: str
+    status: str
+    candidate_item_family: str | None
+    quantity_basis: str | None
+    confirmed_required_each: int | None
+    on_hand_each: int | None
+    counted_by: str | None
+    counted_date: str | None
+    stock_location: str | None
+    on_order_each: int | None
+    included_with: dict | None            # {"kind": "scene_part", "id"} or {"kind": "kit", "name"}
+    intended_configuration_confirmed: bool
+    attaches_to: list                     # scene assembly and/or occurrence ids (may be empty)
+    specification: str | None
+    supplier_part_number: str | None
+    supplier_specification_verified: bool
+    unit_cost: float | None
+    currency: str | None
+    evidence: str | None
+    next_check: str | None
+
+    def as_dict(self):
+        return {k: getattr(self, k) for k in SUPPLEMENT_ITEM_FIELDS}
+
+
+@dataclass
+class Supplement:
+    status: str
+    source: dict
+    items: list
+    file: Path
+    sha256: str
+
+    def item(self, item_id):
+        for it in self.items:
+            if it.item_id == item_id:
+                return it
+        return None
 
 
 @dataclass
@@ -214,6 +315,7 @@ class Project:
     scene: Scene
     instructions: Instructions | None
     inventory: Inventory
+    supplement: Supplement | None = None
 
     @property
     def has_instructions(self):
@@ -224,9 +326,32 @@ class Project:
         if self.instructions is not None:
             h[str(self.instructions.file.relative_to(self.dir))] = self.instructions.sha256
         h[str(self.inventory.file.relative_to(self.dir))] = self.inventory.sha256
+        if self.supplement is not None:
+            h[str(self.supplement.file.relative_to(self.dir))] = self.supplement.sha256
         for p in self.scene.parts.values():
             h[str(p.asset.resolved.relative_to(self.dir))] = p.asset.sha256
         return h
+
+    def non_render_inputs(self):
+        """Manifest files that cannot change any rendered image: the inventory
+        (quantities and stock records) and the supplement (rows not modelled in
+        CAD). Everything else (scene, assets, instructions) can."""
+        names = {str(self.inventory.file.relative_to(self.dir)), "supplement.json"}
+        if self.supplement is not None:
+            names.add(str(self.supplement.file.relative_to(self.dir)))
+        return names
+
+    def geometry_input_hashes(self):
+        """The inputs that can change a mesh: the scene (parts, assets) and the
+        asset files; what the render stage compares with meshes.json."""
+        keep = {str(self.scene.file.relative_to(self.dir))} | {str(p.asset.resolved.relative_to(self.dir)) for p in self.scene.parts.values()}
+        return {k: v for k, v in self.input_hashes().items() if k in keep}
+
+    def render_input_hashes(self):
+        """input_hashes() restricted to the files that affect rendering; what
+        `render.py --reuse` compares between receipts."""
+        skip = self.non_render_inputs()
+        return {k: v for k, v in self.input_hashes().items() if k not in skip}
 
 
 # ------------------------------------------------------------------ helpers
@@ -280,6 +405,61 @@ class _Check:
         if isinstance(v, str) and choices is not None:
             self(v in choices, f"{where}.{key}: expected one of {choices}, got {v!r}")
         return v if isinstance(v, str) else None
+
+    def quantity(self, obj, key, where):
+        """A count: a non-negative integer, or null meaning unknown. Nothing is
+        coerced: a string, a float, a boolean or an absent field is an error."""
+        if not self(key in obj, f"{where}: missing field {key!r} (null means unknown; it is never assumed to be 0)"):
+            return None
+        v = obj.get(key)
+        ok = v is None or (isinstance(v, int) and not isinstance(v, bool) and v >= 0)
+        self(ok, f"{where}.{key}: expected null (unknown) or a non-negative integer, got {v!r}; a quantity is never coerced to 0")
+        return v if ok else None
+
+    def opt_text(self, obj, key, where):
+        """Free text or null; an empty string is not accepted (use null)."""
+        v = obj.get(key)
+        ok = v is None or (isinstance(v, str) and v.strip() != "")
+        self(ok, f"{where}.{key}: expected null or a non-empty string, got {v!r}")
+        return v if ok else None
+
+    def req_bool(self, obj, key, where):
+        """An explicit boolean; absent, null or a yes/no string is an error."""
+        if not self(key in obj, f"{where}: missing field {key!r} (an explicit true/false is required)"):
+            return None
+        v = obj.get(key)
+        self(isinstance(v, bool), f"{where}.{key}: expected an explicit true/false, got {v!r}")
+        return v if isinstance(v, bool) else None
+
+    def iso_date(self, obj, key, where):
+        v = obj.get(key)
+        if v is None:
+            return None
+        ok = isinstance(v, str)
+        if ok:
+            try:
+                datetime.date.fromisoformat(v)
+            except ValueError:
+                ok = False
+        self(ok, f"{where}.{key}: expected an ISO date (YYYY-MM-DD) or null, got {v!r}")
+        return v if ok else None
+
+    def stock(self, obj, where):
+        """The stock record shared by inventory items and supplement rows:
+        `on_hand_each` (integer, or null = unknown, distinct from 0) with
+        `counted_by` and `counted_date` required whenever it is a number,
+        and `stock_location` optional. Returns (on_hand_each, counted_by,
+        counted_date, stock_location)."""
+        on_hand = self.quantity(obj, "on_hand_each", where) if "on_hand_each" in obj else None
+        by = self.opt_text(obj, "counted_by", where)
+        date = self.iso_date(obj, "counted_date", where)
+        loc = self.opt_text(obj, "stock_location", where)
+        if on_hand is not None:
+            self(by is not None, f"{where}.counted_by: required when on_hand_each is a number (who counted)")
+            self(date is not None, f"{where}.counted_date: required when on_hand_each is a number (ISO date of the count)")
+        else:
+            self(by is None and date is None, f"{where}: counted_by/counted_date without an on_hand_each count; set on_hand_each or clear them")
+        return on_hand, by, date, loc
 
     def scalar_dict(self, obj, key, where):
         v = obj.get(key)
@@ -658,57 +838,183 @@ def load_inventory(path, scene: Scene, chk=None):
         where = f"inventory.items[{i}]"
         if not chk.fields(it, ITEM_FIELDS, where):
             continue
-        for k in ITEM_FIELDS:
-            chk(k in it, f"{where}: missing field {k!r} (counted may be null)")
+        for k in ("part_id", "required", "unit"):
+            chk(k in it, f"{where}: missing field {k!r}")
         pid = it.get("part_id")
         chk(pid in scene.parts, f"{where}.part_id: unknown part {pid!r}")
         chk(pid not in seen, f"{where}: duplicate inventory row for {pid!r}")
         seen.add(pid)
         req = it.get("required")
         chk(isinstance(req, int) and not isinstance(req, bool) and req >= 0, f"{where}.required: expected a non-negative integer")
-        cnt = it.get("counted")
-        chk(cnt is None or (isinstance(cnt, int) and not isinstance(cnt, bool) and cnt >= 0), f"{where}.counted: expected null or a non-negative integer")
+        # `counted` is the paper-only box, never data: accepted as null for older files only
+        chk(it.get("counted") is None, f"{where}.counted: the counted box is paper only and not a data field; record stock in on_hand_each with counted_by and counted_date")
         chk(isinstance(it.get("unit"), str) and it.get("unit"), f"{where}.unit: expected a string such as 'each'")
         if pid in scene.parts and isinstance(req, int):
             n = len(scene.installed_occurrences_of(pid))
             chk(req == n, f"{where}: required {req} for {pid!r} but the scene installs {n} occurrence(s)" + (" (reference-only occurrences do not count)" if n != len(scene.occurrences_of(pid)) else ""))
-        items.append(InventoryItem(pid, req if isinstance(req, int) else 0, str(it.get("unit", "")), cnt if isinstance(cnt, int) else None))
+        item = InventoryItem(pid, req if isinstance(req, int) else 0, str(it.get("unit", "")))
+        if any(k in it for k in STOCK_FIELDS):
+            # the optional, recipe-produced stock record: explicit confirmation required
+            item.extended = True
+            item.on_hand_each, item.counted_by, item.counted_date, item.stock_location = chk.stock(it, where)
+            item.intended_configuration_confirmed = chk.req_bool(it, "intended_configuration_confirmed", where)
+        items.append(item)
     missing = sorted(set(scene.parts) - seen)
     chk(not missing, f"inventory.items: no row for part(s) {missing}")
+    notes = data.get("notes", [])
+    if not chk(isinstance(notes, list) and all(isinstance(n, str) and n.strip() for n in notes),
+               "inventory.notes: expected a list of non-empty strings (project sentences for the status block)"):
+        notes = []
     if own:
         chk.raise_if_any()
-    return Inventory(str(data.get("status", "")), items, path, sha256_file(path) if path.is_file() else "")
+    return Inventory(str(data.get("status", "")), items, path, sha256_file(path) if path.is_file() else "", list(notes))
+
+
+# --------------------------------------------------------------- supplement
+
+def load_supplement(path, scene: Scene, chk=None):
+    """supplement.json: items not modelled in CAD. Every row carries every
+    field (null where unknown); quantities are never coerced; `included_with`
+    is null or a discriminated object; `attaches_to` names scene assembly or
+    occurrence ids that must exist; status and kind rules are enforced."""
+    own = chk is None
+    chk = chk or _Check()
+    path = Path(path)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except FileNotFoundError:
+        chk(False, f"supplement: file not found: {path}"); data = None
+    except (OSError, ValueError) as e:
+        chk(False, f"supplement: cannot parse {path}: {e}"); data = None
+    if data is not None and not isinstance(data, dict):
+        chk(False, "supplement: top level must be an object"); data = None
+    if data is None:
+        chk.raise_if_any()
+    chk.fields(data, SUPPLEMENT_FIELDS, "supplement")
+    sv = data.get("schema_version")
+    chk(isinstance(sv, int) and not isinstance(sv, bool) and sv == SUPPLEMENT_SCHEMA_VERSION,
+        f"supplement: schema_version must be the integer {SUPPLEMENT_SCHEMA_VERSION}, got {sv!r}")
+    for key in ("scene", "items"):
+        chk(key in data, f"supplement: missing field {key!r}")
+    ref = data.get("scene")
+    if chk(isinstance(ref, str), "supplement.scene: expected a relative path"):
+        chk((path.parent / ref).resolve() == scene.file.resolve(), f"supplement.scene: {ref!r} is not the loaded scene {scene.file.name!r}")
+    chk(isinstance(data.get("status", ""), str), "supplement.status: expected a string")
+    source = chk.scalar_dict(data, "source", "supplement")
+    chk(isinstance(data.get("items"), list), "supplement.items: expected a list (may be empty)")
+    items = []
+    seen = set()
+    for i, it in enumerate(data.get("items") or []):
+        where = f"supplement.items[{i}]"
+        if not chk.fields(it, set(SUPPLEMENT_ITEM_FIELDS), where):
+            continue
+        missing = [k for k in SUPPLEMENT_ITEM_FIELDS if k not in it]
+        chk(not missing, f"{where}: missing field(s) {missing}; every field is explicit (null where unknown), nothing is assumed")
+        iid = it.get("item_id")
+        if not chk.ident(iid, where + ".item_id"):
+            continue
+        chk(iid not in seen, f"{where}: duplicate item_id {iid!r}")
+        seen.add(iid)
+        where = f"supplement.items[{i}] ({iid})"
+        chk.ident(it.get("joint_id"), where + ".joint_id")
+        scope = chk.opt_str(it, "scope", where, SUPPLEMENT_SCOPES)
+        kind = chk.opt_str(it, "item_kind", where, SUPPLEMENT_ITEM_KINDS)
+        status = chk.opt_str(it, "status", where, SUPPLEMENT_STATUSES)
+        family = chk.opt_text(it, "candidate_item_family", where)
+        basis = chk.opt_text(it, "quantity_basis", where)
+        required = chk.quantity(it, "confirmed_required_each", where)
+        on_hand, by, date, loc = chk.stock(it, where)
+        on_order = chk.quantity(it, "on_order_each", where)
+        confirmed = chk.req_bool(it, "intended_configuration_confirmed", where)
+        verified = chk.req_bool(it, "supplier_specification_verified", where)
+        spec = chk.opt_text(it, "specification", where)
+        spn = chk.opt_text(it, "supplier_part_number", where)
+        currency = chk.opt_text(it, "currency", where)
+        evidence = chk.opt_text(it, "evidence", where)
+        next_check = chk.opt_text(it, "next_check", where)
+        cost = it.get("unit_cost")
+        if not chk(cost is None or (isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost >= 0),
+                   f"{where}.unit_cost: expected null or a non-negative number, got {cost!r}"):
+            cost = None
+        if cost is not None:
+            chk(currency is not None, f"{where}.currency: required when unit_cost is given")
+        # included_with: null or a discriminated object, never a bare string
+        inc = it.get("included_with")
+        included = None
+        if inc is not None:
+            if not isinstance(inc, dict):
+                chk(False, f"{where}.included_with: expected null or an object {{\"kind\": \"scene_part\", \"id\": …}} / {{\"kind\": \"kit\", \"name\": …}}, got {inc!r} (a bare string is not accepted)")
+            else:
+                ik = inc.get("kind")
+                if chk(ik in INCLUDED_WITH_KINDS, f"{where}.included_with.kind: expected one of {INCLUDED_WITH_KINDS}, got {ik!r}"):
+                    chk.fields(inc, INCLUDED_WITH_FIELDS[ik], where + ".included_with")
+                    if ik == "scene_part":
+                        chk(inc.get("id") in scene.parts, f"{where}.included_with.id: unknown scene part {inc.get('id')!r}")
+                        included = {"kind": "scene_part", "id": inc.get("id")}
+                    else:
+                        chk(isinstance(inc.get("name"), str) and inc.get("name", "").strip() != "", f"{where}.included_with.name: expected a non-empty kit name")
+                        included = {"kind": "kit", "name": inc.get("name")}
+        # attaches_to: scene assembly and/or occurrence ids, each existing; empty allowed
+        att = it.get("attaches_to")
+        attaches = []
+        if chk(isinstance(att, list), f"{where}.attaches_to: expected a list of scene assembly/occurrence ids (may be empty), got {att!r}"):
+            for a in att:
+                if chk(isinstance(a, str) and (a in scene.assemblies or a in scene.occurrences), f"{where}.attaches_to: {a!r} is not an assembly or occurrence id in the scene"):
+                    chk(a not in attaches, f"{where}.attaches_to: {a!r} listed twice")
+                    attaches.append(a)
+        # kind and status rules
+        if kind == "family":
+            chk(required is None, f"{where}: a family row must have confirmed_required_each null (a family cannot be given an integer quantity; use quantity_basis text)")
+            chk(on_order is None, f"{where}: a family row cannot be on order (on_order_each must be null); specify a SKU first")
+            chk(family is not None, f"{where}.candidate_item_family: required for a family row")
+        if status == "covered":
+            chk(included is not None, f"{where}: status 'covered' requires a non-null included_with")
+        if status == "specified":
+            chk(kind == "sku", f"{where}: status 'specified' requires item_kind 'sku'")
+            chk(spn is not None, f"{where}: status 'specified' requires supplier_part_number")
+            chk(verified is True, f"{where}: status 'specified' requires supplier_specification_verified true")
+        if verified is True:
+            chk(spn is not None, f"{where}: supplier_specification_verified true without a supplier_part_number")
+        chk(family is not None or spec is not None, f"{where}: a row needs candidate_item_family or specification text to be printable")
+        items.append(SupplementItem(iid, it.get("joint_id", ""), scope or "", kind or "", status or "", family, basis, required,
+                                    on_hand, by, date, loc, on_order, included, bool(confirmed), attaches, spec, spn, bool(verified),
+                                    cost, currency, evidence, next_check))
+    if own:
+        chk.raise_if_any()
+    return Supplement(str(data.get("status", "")), source, items, path, sha256_file(path) if path.is_file() else "")
 
 
 # ------------------------------------------------------------------ project
 
 def load_project(project_dir, scene="scene.json", instructions="instructions.json", inventory="inventory.json", root=None,
-                 require_instructions=False) -> Project:
+                 require_instructions=False, supplement="supplement.json") -> Project:
     """Load and validate a project directory: scene and inventory always, the
     instructions when the file exists (a project without a reviewed sequence
-    still yields a parts inventory). Raises ManifestError listing every problem.
-    `root` is the directory asset paths may not escape; it defaults to the
-    project directory.
+    still yields a parts inventory), the supplement when the file exists.
+    Raises ManifestError listing every problem. `root` is the directory asset
+    paths may not escape; it defaults to the project directory.
     """
     d = Path(project_dir).resolve()
     chk = _Check()
     sc = load_scene(d / scene, root or d, chk)
-    chk.raise_if_any()   # the other two cannot be checked against a broken scene
+    chk.raise_if_any()   # the others cannot be checked against a broken scene
     ins = None
     if (d / instructions).exists():
         ins = load_instructions(d / instructions, sc, chk)
     elif require_instructions:
         chk(False, f"instructions: file not found: {d / instructions}")
     inv = load_inventory(d / inventory, sc, chk)
+    sup = load_supplement(d / supplement, sc, chk) if (d / supplement).exists() else None
     chk.raise_if_any()
-    return Project(d, sc, ins, inv)
+    return Project(d, sc, ins, inv, sup)
 
 
 def inventory_template(scene: Scene):
     """A draft inventory.json for a scene: required = installed occurrences per
-    part (reference-only geometry excluded), nothing counted. Required means
-    installed quantity, not purchased quantity or stock."""
-    items = [{"part_id": pid, "required": len(scene.installed_occurrences_of(pid)), "unit": "each", "counted": None} for pid in scene.parts]
+    part (reference-only geometry excluded), no stock record. Required means
+    installed quantity, not purchased quantity or stock; stock goes in
+    `on_hand_each` with `counted_by`/`counted_date` when it is counted."""
+    items = [{"part_id": pid, "required": len(scene.installed_occurrences_of(pid)), "unit": "each"} for pid in scene.parts]
     return {"schema_version": SCHEMA_VERSION, "scene": scene.file.name,
             "status": "draft: required = installed occurrences in the CAD scene (reference-only geometry excluded); "
                       "not a purchase list, kits not reconciled; physical stock not counted",

@@ -1,10 +1,12 @@
 """Static HTML manual from manual.json: one page, embedded CSS, print rules.
 
 Picture-led parts cards (badge, large picture or wide picture plus end view,
-short label, overall size, CAD quantity labelled as such, a count box), one
-section per subassembly inspection view, the finished assembly with web-only
-clickable callouts, the steps, a compact build record and, when the model
-asks for it, a technical appendix with full identities and hashes. Web-only
+short label, overall size, CAD quantity labelled as such, a paper count box),
+a separate table of supplementary items (not modelled in CAD, never summed
+with CAD counts), one section per subassembly inspection view and per joint
+close-up (each with its "hardware to review" list), the finished assembly
+with web-only clickable callouts, the steps, a compact build record and, when
+the model asks for it, a technical appendix with full identities and hashes. Web-only
 extras (callouts, count inputs) are marked `.web-only` and hidden in print;
 the printed page shows blank count boxes. Images are referenced relatively
 from images/ unless embedded as data URIs.
@@ -30,6 +32,17 @@ h2 { font-size: 1.4rem; margin: 2rem 0 .75rem; border-bottom: 2px solid var(--in
 .status .state { font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
 .hint { color: var(--muted); font-size: .9rem; }
 .label { display: inline-block; min-width: 2rem; height: 2rem; line-height: 2rem; text-align: center; border-radius: 50%; border: 2px solid var(--ink); font-weight: 700; margin-right: .5rem; }
+.label.sup { border-radius: 4px; border-style: dashed; font-size: .85rem; padding: 0 .3rem; }
+.kicker { font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+table.supplement { width: 100%; border-collapse: collapse; background: var(--card); font-size: .9rem; }
+table.supplement th, table.supplement td { border: 1px solid var(--line); padding: 6px 8px; vertical-align: top; text-align: left; }
+table.supplement .count-box { width: 3.6rem; height: 2rem; }
+.hardware { grid-column: 1 / -1; border-top: 1px dashed var(--line); padding-top: 8px; }
+.hardware h4 { margin: 0 0 6px; font-size: .9rem; color: var(--accent); }
+.hardware ul { margin: 0; padding-left: 1.2rem; }
+section.joint { background: var(--card); border: 2px solid var(--ink); margin: 24px 0; padding: 16px; display: grid; grid-template-columns: 1fr 300px; gap: 16px; }
+section.joint header { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+section.joint .note { grid-column: 1 / -1; }
 .count-box { display: inline-block; width: 4.5rem; height: 2.4rem; border: 2px solid var(--ink); vertical-align: middle; background: #fff; }
 input.count { width: 4.5rem; height: 2.4rem; font-size: 1.2rem; text-align: center; }
 .parts-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
@@ -76,15 +89,15 @@ dl.receipt dt { font-weight: 600; } dl.receipt dd { margin: 0; overflow-wrap: an
 table.appendix { width: 100%; border-collapse: collapse; font-size: .78rem; }
 table.appendix th, table.appendix td { border: 1px solid var(--line); padding: 4px 6px; vertical-align: top; text-align: left; overflow-wrap: anywhere; }
 table.appendix code { font-size: .75rem; }
-@media (max-width: 720px) { section.step, section.group { grid-template-columns: 1fr; } .step-images.with-result { grid-template-columns: 1fr; } }
+@media (max-width: 720px) { section.step, section.group, section.joint { grid-template-columns: 1fr; } .step-images.with-result { grid-template-columns: 1fr; } }
 @media print {
   @page { size: A4; margin: 12mm; }
   body { background: #fff; font-size: 11pt; }
   main { max-width: none; padding: 0; }
   .web-only { display: none !important; }
   .parts-grid { grid-template-columns: repeat(3, 1fr); }
-  article.part, figure, table.group-parts tr, table.appendix tr { break-inside: avoid; page-break-inside: avoid; }
-  section.step, section.group, h2.appendix { break-before: page; page-break-before: always; border-width: 1.5pt; }
+  article.part, figure, table.group-parts tr, table.appendix tr, table.supplement tr { break-inside: avoid; page-break-inside: avoid; }
+  section.step, section.group, section.joint, h2.appendix, h2.supplement { break-before: page; page-break-before: always; border-width: 1.5pt; }
   h2.parts { break-before: page; page-break-before: always; }
   a { color: inherit; text-decoration: none; }
 }
@@ -148,7 +161,6 @@ def render(model, out_dir, embed_images=False):
     o.append(f"<p class=\"hint\">Inventory status: {e(model['inventory_status'])}.</p>")
     o.append('<div class="parts-grid">')
     for row in model["inventory"]:
-        counted = "" if row["counted"] is None else str(row["counted"])
         o.append(f'<article class="part" id="part-{slug(row["part_id"])}" data-part="{e(row["part_id"])}" data-required="{row["required"]}" data-label="{row["label"]}">')
         o.append(f'<h3><span class="label">{row["label"]}</span><span>{e(row["label_text"])}</span></h3>')
         if row.get("end_view"):
@@ -156,14 +168,48 @@ def render(model, out_dir, embed_images=False):
                      f'<img src="{src(row["end_view"])}" alt="{e(row["label_text"])}, end view"></div>')
         else:
             o.append(f'<div class="pic"><img src="{src(row["thumbnail"])}" alt="{e(row["label_text"])}"></div>')
+        confirmed = row.get("intended_configuration_confirmed")
         o.append(f'<div class="size">{e(row["dimensions"])}' + (f'<br>{e(row["details"])}' if row.get("details") else "")
                  + (f'<br>{e(row["description"])}' if row["description"] else "")
+                 + (f'<br>{e(row["stock_text"])}' if row.get("stock_text") else "")
+                 + (f'<br>intended configuration confirmed: {"yes" if confirmed else "no"}' if confirmed is not None else "")
                  + (f'<br><strong class="review">⚠ {e(row["review_note"])}</strong>' if row.get("review_note") else "") + "</div>")
         o.append(f'<div class="qty-row"><div class="cadqty">{row["required"]}<small>CAD qty, {e(row["unit"])}</small></div>'
-                 f'<div><input class="count web-only" type="number" min="0" value="{counted}" aria-label="quantity counted for {e(row["label_text"])}">'
-                 f'<span class="count-box print-only">{counted}</span><small class="hint" style="display:block;text-align:center">counted</small></div></div>')
+                 f'<div><input class="count web-only" type="number" min="0" value="" aria-label="paper count for {e(row["label_text"])} (not stored)">'
+                 f'<span class="count-box print-only"></span><small class="hint" style="display:block;text-align:center">counted</small></div></div>')
         o.append("</article>")
     o.append("</div>")
+    o.append(f"<p class=\"hint\">{e(model['count_box_note'])}</p>")
+
+    # supplementary items (not modelled in CAD): existing-design rows only; new-design rows in the appendix
+    sup = model["supplement"]
+    printed = [r for r in sup["rows"] if not r["appendix_only"]]
+    if sup["present"]:
+        o.append('<h2 class="supplement" id="supplement">Supplementary items (not modelled in CAD)</h2>')
+        o.append(f"<p class=\"hint\">{e(sup['note'])}" + (f" Status: {e(sup['status'])}." if sup["status"] else "") + "</p>")
+        if printed:
+            o.append('<table class="supplement"><thead><tr><th>#</th><th>Item</th><th>Kind, status</th><th>Required</th><th>Stock</th><th>Included with</th><th>Config. confirmed</th><th>counted</th></tr></thead><tbody>')
+            for r in printed:
+                o.append(f'<tr id="sup-{slug(r["item_id"])}" data-sitem="{e(r["item_id"])}" data-scope="{e(r["scope"])}" data-status="{e(r["status"])}">'
+                         f'<td><span class="label sup">{r["label"]}</span></td>'
+                         f'<td><strong>{e(r["title"])}</strong><br><code>{e(r["item_id"])}</code> · joint <code>{e(r["joint_id"])}</code><br><span class="hint">attaches to: {e(r["attaches_text"])}</span>'
+                         + (f'<br><span class="hint">{e(r["specification"])}</span>' if r["specification"] and r["title"] != r["specification"] else "") + "</td>"
+                         f'<td>{e(r["kind_text"])}<br>{e(r["status_text"])}</td><td>{e(r["required_text"])}</td><td>{e(r["stock_text"])}</td>'
+                         f'<td>{e(r["included_with_text"]) or "—"}</td><td>{"yes" if r["intended_configuration_confirmed"] else "no"}</td>'
+                         f'<td><span class="count-box"></span></td></tr>')
+            o.append("</tbody></table>")
+        else:
+            o.append('<p class="hint">No supplementary items for the existing design; new-design rows are in the appendix' + ("" if model["appendix"] else " (not printed)") + ".</p>")
+        if sup["new_design"]:
+            o.append(f'<p class="hint">{len(sup["new_design"])} new-design row(s) are listed in the appendix' + ("" if model["appendix"] else " (not printed in this compact document)") + ".</p>")
+
+    def hardware_list(items, attr, key):
+        if not items:
+            return
+        o.append(f'<div class="hardware"><h4>{e(sup["hardware_heading"])}</h4><ul>')
+        for h in items:
+            o.append(f'<li {attr}="{e(key)}" data-sitem="{e(h["item_id"])}"><a href="#sup-{slug(h["item_id"])}"><span class="label sup">{h["label"]}</span></a> {e(h["title"])} · {e(h["status_text"])} · {e(h["required_text"])} · joint <code>{e(h["joint_id"])}</code></li>')
+        o.append("</ul></div>")
 
     # subassembly inspection views
     if model["groups"]:
@@ -172,7 +218,7 @@ def render(model, out_dir, embed_images=False):
     for g in model["groups"]:
         gslug = slug(g["id"])
         o.append(f'<section class="group" id="group-{gslug}" data-group="{e(g["id"])}" data-index="{g["index"]}">')
-        o.append(f'<header><div class="step-number">S{g["index"]}</div><div><div style="font-size:1.2rem;font-weight:700">{e(g["short_name"])}</div>'
+        o.append(f'<header><div class="step-number">{g["index"]}</div><div><div class="kicker">Subassembly</div><div style="font-size:1.2rem;font-weight:700">{e(g["short_name"])}</div>'
                  f'<div class="step-title"><code>{e(g["id"])}</code>' + (f' · under <code>{e(g["parent_id"])}</code>' if g["parent_id"] else "") + "</div></div></header>")
         o.append('<figure><div class="overview-wrap">')
         o.append(f'<img src="{src(g["image"])}" alt="Subassembly {g["index"]}: {e(g["short_name"])}">')
@@ -184,6 +230,30 @@ def render(model, out_dir, embed_images=False):
                      f'<td><img src="{src(p["thumbnail"])}" alt="{e(p["label_text"])}"></td><td>{e(p["label_text"])}</td><td class="qty">×{p["qty"]}</td></tr>')
         o.append("</tbody></table>")
         o.append(f'<p class="note hint">{len(g["occurrences"])} occurrence(s) in this subassembly; ids in manual.json' + (" and the appendix" if model["appendix"] else "") + ".</p>")
+        hardware_list(g.get("hardware", []), "data-sgroup", g["id"])
+        o.append("</section>")
+
+    # joint close-ups
+    if model["joints"]:
+        o.append('<h2 id="joints">Joint close-ups (inspection views)</h2>')
+        o.append('<p class="hint">Each close-up frames the occurrences that form one project joint at their CAD positions; the rest of the context assembly is drawn subdued or hidden. Inspection views, not steps: no fastener, order or tool access is implied.</p>')
+    for j in model["joints"]:
+        jslug = slug(j["joint_id"])
+        o.append(f'<section class="joint" id="joint-{jslug}" data-joint="{e(j["joint_id"])}" data-index="{j["index"]}">')
+        o.append(f'<header><div class="step-number">{j["index"]}</div><div><div class="kicker">Joint close-up</div><div style="font-size:1.2rem;font-weight:700"><code>{e(j["joint_id"])}</code></div>'
+                 f'<div class="step-title">context <code>{e(j["context_assembly"])}</code> ({e(j["context_style"])}, {len(j["context_occurrences"])} other occurrence(s))</div></div></header>')
+        o.append('<figure><div class="overview-wrap">')
+        o.append(f'<img src="{src(j["image"])}" alt="Joint {j["index"]}: {e(j["joint_id"])}">')
+        o.append(callouts_svg(model, out_dir, j["view_id"]))
+        o.append(f'</div><figcaption>{e(j["note"])}.</figcaption></figure>')
+        o.append('<table class="group-parts"><tbody>')
+        for oc in j["occurrences"]:
+            o.append(f'<tr data-joint-occ="{e(oc["id"])}"><td><span class="label">{oc["label"]}</span></td><td><img src="{src(oc["thumbnail"])}" alt="{e(oc["label_text"])}"></td>'
+                     f'<td>{e(oc["label_text"])}<br><code class="hint">{e(oc["id"])}</code></td></tr>')
+        o.append("</tbody></table>")
+        hardware_list(j["hardware"], "data-sjoint", j["view_id"])
+        if not j["hardware"]:
+            o.append('<p class="note hint">No supplementary items are recorded for this joint.</p>')
         o.append("</section>")
 
     # overview
@@ -237,6 +307,8 @@ def render(model, out_dir, embed_images=False):
     for w in rr.get("warnings") or []:
         o.append(f"<dt>render warning</dt><dd>{e(w)}</dd>")
     o.append(f"<dt>images</dt><dd>{len(r['render_views'])} render(s), hashes in manual.json" + (" and the appendix" if model["appendix"] else "") + "</dd>")
+    if model["supplement"]["present"]:
+        o.append(f"<dt>supplement.json</dt><dd>{len(model['supplement']['rows'])} row(s): {len(model['supplement']['existing'])} existing design, {len(model['supplement']['new_design'])} new design; never added to CAD quantities</dd>")
     o.append(f"<dt>generator</dt><dd>{e('; '.join(f'{k} {v}' for k, v in r['generator'].items()))}</dd>")
     o.append("</dl>")
     o.append(f"<p class=\"hint\">Review state {e(model['review_state'])}; physical assembly not validated. Hotspot files for interactive use: {', '.join(e(v) for v in model['hotspots'].values())} (web only).</p>")
@@ -259,8 +331,35 @@ def render(model, out_dir, embed_images=False):
                      + (f'<br>reference only: {"; ".join(e(x) for x in row["reference_occurrences"])}' if row["reference_occurrences"] else "") + "</td></tr>")
         o.append("</tbody></table>")
         for g in model["groups"]:
-            o.append(f'<p class="hint"><strong>S{g["index"]} {e(g["id"])}</strong> (path {" / ".join(e(x) for x in g["path"])}): '
+            o.append(f'<p class="hint"><strong>Subassembly {g["index"]} {e(g["id"])}</strong> (path {" / ".join(e(x) for x in g["path"])}): '
                      + "; ".join(f'{e(oc["id"])} → part {oc["label"]}' for oc in g["occurrences"]) + "</p>")
+        for j in model["joints"]:
+            o.append(f'<p class="hint"><strong>Joint {j["index"]} {e(j["joint_id"])}</strong> (context {e(j["context_assembly"])}, {e(j["context_style"])}): '
+                     + "; ".join(f'{e(oc["id"])} → part {oc["label"]}' for oc in j["occurrences"]) + f'; context occurrences: {"; ".join(e(x) for x in j["context_occurrences"]) or "none"}</p>')
+        stock_rows = [row for row in model["inventory"] if row.get("intended_configuration_confirmed") is not None]
+        if stock_rows:
+            o.append('<table class="appendix"><thead><tr><th>#</th><th>Part</th><th>Stock record</th><th>Configuration confirmed</th></tr></thead><tbody>')
+            for row in stock_rows:
+                o.append(f'<tr><td>{row["label"]}</td><td>{e(row["label_text"])}</td><td>{e(row["stock_text"])}</td><td>{"yes" if row["intended_configuration_confirmed"] else "no"}</td></tr>')
+            o.append("</tbody></table>")
+        if model["supplement"]["present"]:
+            o.append('<h3>Supplementary items, every field</h3>')
+            o.append(f"<p class=\"hint\">{e(model['supplement']['note'])}" + "".join(f" {e(k)}: {e(str(v))}." for k, v in model["supplement"]["source"].items()) + "</p>")
+            o.append('<table class="appendix"><thead><tr><th>#</th><th>item_id, joint_id, scope</th><th>kind, status</th><th>family / specification</th><th>quantities</th><th>included_with, attaches_to</th><th>supplier, cost</th><th>evidence, next_check</th></tr></thead><tbody>')
+            for sr in model["supplement"]["rows"]:
+                inc = sr["included_with"]
+                inc_text = "null" if not inc else "; ".join(f"{k} {v}" for k, v in inc.items())
+                o.append(f'<tr data-sitem-appendix="{e(sr["item_id"])}"><td>{sr["label"]}</td><td><code>{e(sr["item_id"])}</code><br>joint <code>{e(sr["joint_id"])}</code><br>scope {e(sr["scope"])}</td>'
+                         f'<td>{e(sr["item_kind"])}<br>{e(sr["status"])}<br>intended_configuration_confirmed {str(sr["intended_configuration_confirmed"]).lower()}</td>'
+                         f'<td>{e(sr["candidate_item_family"] or "null")}<br>{e(sr["specification"] or "null")}' + (f'<br>basis: {e(sr["quantity_basis"])}' if sr["quantity_basis"] else "") + "</td>"
+                         f'<td>confirmed_required_each {sr["confirmed_required_each"] if sr["confirmed_required_each"] is not None else "null"}<br>on_hand_each {sr["on_hand_each"] if sr["on_hand_each"] is not None else "null"}'
+                         + (f'<br>counted_by {e(sr["counted_by"])}, counted_date {e(sr["counted_date"])}' if sr["on_hand_each"] is not None else "")
+                         + (f'<br>stock_location {e(sr["stock_location"])}' if sr["stock_location"] else "")
+                         + f'<br>on_order_each {sr["on_order_each"] if sr["on_order_each"] is not None else "null"}</td>'
+                         f'<td>{e(inc_text)}<br>attaches_to: {"; ".join(e(a) for a in sr["attaches_to"]) or "[]"}</td>'
+                         f'<td>supplier_part_number {e(sr["supplier_part_number"] or "null")}<br>verified {str(sr["supplier_specification_verified"]).lower()}<br>unit_cost {sr["unit_cost"] if sr["unit_cost"] is not None else "null"} {e(sr["currency"] or "")}</td>'
+                         f'<td>{e(sr["evidence"] or "null")}<br>next_check {e(sr["next_check"] or "null")}</td></tr>')
+            o.append("</tbody></table>")
         o.append('<dl class="receipt">')
         for k, v in r["input_hashes"].items():
             o.append(f"<dt>{e(k)}</dt><dd>{e(v)}</dd>")

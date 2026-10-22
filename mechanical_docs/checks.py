@@ -4,9 +4,10 @@
 
 Reads OUT_DIR/manual.json as the reference, parses index.html for inventory
 cards (part, CAD quantity), subassembly sections (group, parts, quantities),
+joint sections, supplementary rows and the per-group/per-joint hardware lists,
 step order and every image/link target, and reads the PDF back with pdftotext
-(Poppler, content order) for the `Step N`, `Subassembly N`, `[step-id]` and
-`CAD qty N` tokens. Rasterises the PDF pages (pdftoppm) and writes greyscale
+(Poppler, content order) for the `Step N`, `Subassembly N`, `Joint N`,
+`[step-id]` and `CAD qty N` tokens and the printed supplementary item ids. Rasterises the PDF pages (pdftoppm) and writes greyscale
 copies of the step images (ImageMagick) under OUT_DIR/checks/ for inspection.
 Each check is reported as passed, failed or not run; the exit status is 1 if
 any check failed.
@@ -32,6 +33,9 @@ class _Html(HTMLParser):
         self.needed = []        # (step id, part, qty)
         self.groups = []        # (group id, index)
         self.group_parts = []   # (group id, part, qty)
+        self.joints = []        # (joint id, index)
+        self.sup_rows = []      # (item id, scope, status) in the supplementary table
+        self.hardware = []      # (kind, group/joint key, item id) from the per-group and per-joint lists
         self.images = []
         self.links = []
         self.ids = set()
@@ -52,6 +56,14 @@ class _Html(HTMLParser):
             self.groups.append((a["data-group"], int(a["data-index"])))
         if tag == "tr" and "data-gpart" in a and self._group:
             self.group_parts.append((self._group, a["data-gpart"], int(a["data-qty"])))
+        if tag == "section" and "data-joint" in a:
+            self.joints.append((a["data-joint"], int(a["data-index"])))
+        if tag == "tr" and "data-sitem" in a and "data-scope" in a:
+            self.sup_rows.append((a["data-sitem"], a["data-scope"], a.get("data-status")))
+        if tag == "li" and "data-sgroup" in a:
+            self.hardware.append(("group", a["data-sgroup"], a["data-sitem"]))
+        if tag == "li" and "data-sjoint" in a:
+            self.hardware.append(("joint", a["data-sjoint"], a["data-sitem"]))
         if tag == "div" and "data-qty" in a and self._step:
             self.needed.append((self._step, a["data-part"], int(a["data-qty"])))
         if tag == "img" and "src" in a:
@@ -87,6 +99,10 @@ def run(args):
     ref_needed = [(s["id"], n["part_id"], n["qty"]) for s in model["steps"] for n in s["parts_needed"]]
     ref_groups = [(g["id"], g["index"]) for g in model.get("groups", [])]
     ref_gparts = [(g["id"], p["part_id"], p["qty"]) for g in model.get("groups", []) for p in g["parts"]]
+    ref_joints = [(j["joint_id"], j["index"]) for j in model.get("joints", [])]
+    sup = model.get("supplement") or {"present": False, "rows": [], "existing": [], "new_design": [], "by_group": {}, "by_joint": {}}
+    ref_sup = [(r["item_id"], r["scope"], r["status"]) for r in sup["rows"] if not r["appendix_only"]]
+    ref_hw = [("group", g, i) for g, items in sup["by_group"].items() for i in items] + [("joint", j, i) for j, items in sup["by_joint"].items() for i in items]
     # a subassembly's part quantities can never exceed the whole scene's
     over = [(g, p, q) for g, p, q in ref_gparts if q > dict((r["part_id"], r["required"]) for r in model["inventory"]).get(p, 0)]
     if ref_groups:
@@ -101,6 +117,14 @@ def run(args):
     else:
         check("manual.json: parts needed over all steps equal required quantities", "not-run", "no steps: inventory-only document")
     check("manual.json: step indices are 1..N in order", "passed" if [i for _, i in ref_steps] == list(range(1, len(ref_steps) + 1)) else "failed")
+    if sup["present"]:
+        # supplementary quantities are their own list: none is a CAD part row, and every printed row keeps null as unknown
+        cad_ids = {r["part_id"] for r in model["inventory"]}
+        mixed = [r["item_id"] for r in sup["rows"] if r["item_id"] in cad_ids]
+        coerced = [r["item_id"] for r in sup["rows"] if any(r[k] == 0 and "unknown" in r["required_text" if k == "confirmed_required_each" else "stock_text"]
+                                                          for k in ("confirmed_required_each", "on_hand_each"))]
+        check("manual.json: supplementary rows are separate from CAD parts and keep unknown quantities unknown", "passed" if not mixed and not coerced else "failed",
+              {"item ids colliding with part ids": mixed, "zero printed as unknown": coerced} if mixed or coerced else f"{len(sup['rows'])} rows, {len(ref_sup)} printed, {len(sup['new_design'])} appendix-only")
 
     # HTML
     html_path = out / "index.html"
@@ -110,6 +134,10 @@ def run(args):
     check("HTML parts-needed per step match manual.json", "passed" if p.needed == ref_needed else "failed", {"html": p.needed, "ref": ref_needed})
     check("HTML subassembly sections match manual.json", "passed" if p.groups == ref_groups and p.group_parts == ref_gparts else "failed",
           {"html": [p.groups, p.group_parts], "ref": [ref_groups, ref_gparts]})
+    check("HTML joint sections match manual.json", "passed" if p.joints == ref_joints else "failed", {"html": p.joints, "ref": ref_joints})
+    if sup["present"]:
+        check("HTML supplementary rows match manual.json", "passed" if p.sup_rows == ref_sup else "failed", {"html": p.sup_rows, "ref": ref_sup})
+        check("HTML per-group and per-joint hardware lists match manual.json", "passed" if sorted(p.hardware) == sorted(ref_hw) else "failed", {"html": p.hardware, "ref": ref_hw})
     missing_imgs = [s for s in p.images if not s.startswith("data:") and not (out / s).is_file()]
     check("HTML images resolve", "passed" if not missing_imgs else "failed", missing_imgs or f"{len(p.images)} images")
     bad_links = []
@@ -142,6 +170,15 @@ def run(args):
         check("PDF CAD quantities match manual.json", "passed" if req_in_pdf == [r for _, r, _ in ref_inv] else "failed", {"pdf": req_in_pdf, "ref": [r for _, r, _ in ref_inv]})
         groups_in_pdf = [int(m) for m in re.findall(r"^\s*Subassembly (\d+):", text, re.M)]
         check("PDF subassembly headings are 1..M in order", "passed" if groups_in_pdf == [i for _, i in ref_groups] else "failed", {"pdf": groups_in_pdf, "ref": [i for _, i in ref_groups]})
+        joints_in_pdf = [int(m) for m in re.findall(r"^\s*Joint (\d+):", text, re.M)]
+        check("PDF joint headings are 1..K in order", "passed" if joints_in_pdf == [i for _, i in ref_joints] else "failed", {"pdf": joints_in_pdf, "ref": [i for _, i in ref_joints]})
+        if sup["present"]:
+            # the printed rows name their item ids; appendix-only rows appear only when the appendix is printed
+            absent = [i for i in sup["existing"] if i not in text]
+            leaked = [] if model.get("appendix") else [i for i in sup["new_design"] if i in text]
+            heading = "Supplementary items (not modelled in CAD)" in text
+            check("PDF prints the supplementary items as manual.json lists them", "passed" if heading and not absent and not leaked else "failed",
+                  {"missing ids": absent, "new-design ids printed without the appendix": leaked, "heading": heading} if absent or leaked or not heading else f"{len(sup['existing'])} ids present")
         for token in (model["review_state"],):
             check(f"PDF states review state {token!r}", "passed" if token.upper() in text or token in text else "failed")
         if pdfinfo:
@@ -149,8 +186,8 @@ def run(args):
             pages = int(re.search(r"Pages:\s+(\d+)", info).group(1))
             report["pdf_pages"] = pages
             # one page per step after the front matter, so each step has a usable page break
-            check("PDF has at least one page per step and subassembly plus front matter", "passed" if pages >= len(ref_steps) + len(ref_groups) + (2 if ref_steps else 1) else "failed",
-                  f"{pages} pages for {len(ref_steps)} steps and {len(ref_groups)} subassemblies")
+            check("PDF has at least one page per step, subassembly and joint plus front matter", "passed" if pages >= len(ref_steps) + len(ref_groups) + len(ref_joints) + (2 if ref_steps else 1) else "failed",
+                  f"{pages} pages for {len(ref_steps)} steps, {len(ref_groups)} subassemblies and {len(ref_joints)} joints")
         if pdfimages:
             imgs = run_cmd([pdfimages, "-list", str(pdf)]).stdout.strip().splitlines()
             n_imgs = max(0, len(imgs) - 2)

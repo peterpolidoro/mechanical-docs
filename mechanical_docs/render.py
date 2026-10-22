@@ -16,6 +16,10 @@ pose (the scene's +Z-up frame, scaled to metres exactly once), and renders:
     overview.png             the finished assembly, instruction camera
     group-<assembly>.png     one subassembly alone, every occurrence at its canonical
                              pose, auto-framed: an inspection/parts view, not a step
+    joint-<joint>.png        a close-up of one project joint (render.json `joint_views`):
+                             the listed occurrences framed alone at their canonical
+                             poses, the rest of their context assembly faded or
+                             hidden: an inspection view, not a step
     step-NN-<step>.png       parts installed before the step subdued (flat grey
                              silhouettes, thin outline), the step's additions in
                              their looks with a thick outline, later parts hidden;
@@ -33,8 +37,10 @@ hotspots/<view>.json carries each visible occurrence's projected pixel box for
 web callouts. render-receipt.json records versions, settings, hashes and checks.
 
 --reuse RENDER_DIR copies views from an earlier complete receipt made from the
-same inputs, meshes, engine and quality instead of rendering them again; only
-views named in --views or absent from that receipt are rendered. Each copied
+same scene, assets, instructions, meshes, engine and quality instead of
+rendering them again (the inventory and the supplement never change an image,
+so they may differ); only views named in --views or absent from that receipt
+are rendered. Each copied
 view keeps its own record plus `reused_from`, so the receipt stays honest about
 what was rendered when and under which settings.
 
@@ -84,6 +90,46 @@ def aabb_of(points):
     mn = Vector((min(p.x for p in points), min(p.y for p in points), min(p.z for p in points)))
     mx = Vector((max(p.x for p in points), max(p.y for p in points), max(p.z for p in points)))
     return mn, mx
+
+
+def common_ancestor(scene, occ_ids):
+    """The deepest assembly containing every listed occurrence (the root when
+    nothing deeper does)."""
+    paths = [scene.occurrences[o].path for o in occ_ids]
+    common = []
+    for level in zip(*paths):
+        if len(set(level)) != 1:
+            break
+        common.append(level[0])
+    return common[-1] if common else scene.root_id
+
+
+def resolve_joint_views(scene, specs):
+    """Check `joint_views` against the scene and fill the defaults: view id,
+    context assembly (deepest common ancestor unless given)."""
+    out = []; seen = set()
+    for i, jv in enumerate(specs):
+        where = f"render.json joint_views[{i}] ({jv['joint_id']})"
+        for oid in jv["occurrence_ids"]:
+            if oid not in scene.occurrences:
+                hint = " (an assembly id; list its occurrences, or use inspection_groups)" if oid in scene.assemblies else ""
+                raise SystemExit(f"{where}: {oid!r} is not an occurrence id in the scene{hint}")
+        ctx = jv.get("context")
+        if ctx is None:
+            ctx = common_ancestor(scene, jv["occurrence_ids"])
+        elif ctx not in scene.assemblies:
+            raise SystemExit(f"{where}: context {ctx!r} is not an assembly id in the scene")
+        else:
+            outside = [o for o in jv["occurrence_ids"] if ctx not in scene.occurrences[o].path]
+            if outside:
+                raise SystemExit(f"{where}: occurrence(s) {outside} are not under the context assembly {ctx!r}")
+        vid = f"joint-{slug(jv.get('id') or jv['joint_id'])}"
+        if vid in seen:
+            raise SystemExit(f"{where}: view id {vid!r} repeats; give each view of a joint its own 'id'")
+        seen.add(vid)
+        out.append({"view_id": vid, "id": jv.get("id"), "joint_id": jv["joint_id"], "occurrence_ids": list(jv["occurrence_ids"]),
+                    "direction": jv.get("direction"), "context": ctx, "context_style": jv["context_style"]})
+    return out
 
 
 class Renderer:
@@ -692,6 +738,49 @@ class Renderer:
         self.restore(); self.verify_restored(view_id)
         return rec
 
+    def render_joint(self, spec):
+        """A close-up of one project joint: the listed occurrences framed alone
+        at their canonical poses, the rest of the context assembly subdued
+        (flat grey, thin outline) or hidden, everything else hidden. An
+        inspection view, not a step: nothing moves, nothing is invented."""
+        view_id = spec["view_id"]
+        self.restore()
+        subject = list(spec["occurrence_ids"])
+        ctx_asm = spec["context"]; style = spec["context_style"]
+        context = [oid for oid in self.group_members(ctx_asm) if oid not in subject]
+        for oid, o in self.obj_of.items():
+            if oid in subject:
+                self.coll_subject.objects.link(o)
+            elif oid in context and style == "faded":
+                o.material_slots[0].material = self.context_mat; self.coll_context.objects.link(o)
+            else:
+                o.hide_render = True
+        self.set_resolution(self.long_side(), self.s["aspect"])
+        pts = []
+        for oid in subject:
+            pts += self.occurrence_corners(oid)
+        mn, mx = aabb_of(pts); ctr = (mn + mx) / 2
+        d = Vector(spec["direction"]).normalized() if spec.get("direction") else self.facing_direction(self.s["joint_direction"], mx - mn)
+        # the eye sits outside the whole scene, so no context geometry is cut by the camera plane
+        self.aim(ctr + d * max(self.scene_radius * 4, (mx - mn).length * 4, 1e-3), ctr, Vector((0, 0, 1)))
+        framed = self.fit(pts, "orthographic", self.s["joint_fill"])
+        visible = subject + (context if style == "faded" else [])
+        self.place_floor([self.obj_of[oid] for oid in visible], "joint")
+        path, secs = self.render_to(view_id, self.samples())
+        hs = self.hotspots(view_id, visible)
+        self.write_hotspots(hs)
+        occ = self.scene.occurrences
+        rec = self.view_record(view_id, path, secs, kind="joint", joint_id=spec["joint_id"], occurrence_ids=subject,
+                               occurrences=[{"id": oid, "part_id": occ[oid].part_id, "parent_id": occ[oid].parent_id} for oid in subject],
+                               context_assembly=ctx_asm, context_style=style, context_occurrences=context,
+                               hidden=[oid for oid in self.obj_of if oid not in visible], visible=visible,
+                               direction=[round(v, 4) for v in d], direction_from_settings=spec.get("direction") is not None,
+                               poses="canonical", exploded=False, framed=framed, extent_m=[round(v, 4) for v in (mx - mn)],
+                               note="inspection view, not a step: the joint's occurrences at their CAD poses with the rest of the context subdued; "
+                                    "no fastener, sequence or tool access implied")
+        self.restore(); self.verify_restored(view_id)
+        return rec
+
     def render_step(self, st, result=False):
         step = st.step
         view_id = f"step-{st.index:02d}-{slug(step.id)}" + ("-result" if result else "")
@@ -740,7 +829,7 @@ class Renderer:
 
     # ---------------------------------------------------------------- run
 
-    def plan(self, groups=()):
+    def plan(self, groups=(), joints=()):
         plan = []
         for pid in self.scene.parts:
             plan.append((f"part-{slug(pid)}", lambda pid=pid: self.render_thumbnail(pid)))
@@ -749,6 +838,8 @@ class Renderer:
         plan.append(("overview", self.render_overview))
         for gid in groups:
             plan.append((f"group-{slug(gid)}", lambda gid=gid: self.render_group(gid)))
+        for jv in joints:
+            plan.append((jv["view_id"], lambda jv=jv: self.render_joint(jv)))
         for st in self.states:
             plan.append((f"step-{st.index:02d}-{slug(st.step.id)}", lambda st=st: self.render_step(st)))
             if st.step.approach is not None:
@@ -776,7 +867,7 @@ class Renderer:
                         "reused_generated_at_utc": reuse["generated_at_utc"], "reused_blender": reuse.get("blender")})
         return rec
 
-    def run(self, only=None, groups=(), reuse=None):
+    def run(self, only=None, groups=(), reuse=None, joints=()):
         """Render the plan. `only` restricts rendering to those view ids; with
         `reuse`, every other planned view present in the earlier receipt is
         copied and views absent from it are rendered. Returns (views, missing)."""
@@ -784,7 +875,7 @@ class Renderer:
         views = []
         old = {v["id"]: v for v in reuse["views"]} if reuse else {}
         missing = []
-        for view_id, fn in self.plan(groups):
+        for view_id, fn in self.plan(groups, joints):
             wanted = not only or view_id in only
             if reuse is not None and view_id in old and not (only and view_id in only):
                 rec = self.reuse_view(old[view_id], reuse)
@@ -831,9 +922,11 @@ def main(argv):
     meshes["_path"] = str(meshes_path.resolve())
     if meshes.get("kind") != "mechanical-docs-mesh-receipt":
         raise SystemExit(f"{meshes_path}: not a mesh receipt")
-    stale = {k: v for k, v in project.input_hashes().items() if meshes["input_hashes"].get(k) != v}
+    # meshes depend on the scene and the asset files only; a changed inventory,
+    # supplement or instruction file does not call for a new CAD stage
+    stale = {k: v for k, v in project.geometry_input_hashes().items() if meshes["input_hashes"].get(k) != v}
     if stale:
-        raise SystemExit(f"{meshes_path} was made from different inputs ({sorted(stale)}); re-run the CAD stage")
+        raise SystemExit(f"{meshes_path} was made from different geometry inputs ({sorted(stale)}); re-run the CAD stage")
     if not meshes.get("all_checks_passed"):
         raise SystemExit(f"{meshes_path}: the CAD stage reported problems; not rendering unchecked geometry")
     settings, settings_path = load_settings(project.dir)
@@ -845,6 +938,7 @@ def main(argv):
             raise SystemExit(f"--groups/inspection_groups: {g!r} is the root; the overview already shows it")
         if g not in groups:
             groups.append(g)
+    joints = resolve_joint_views(project.scene, settings["joint_views"])
     reuse = None
     if reuse_dir is not None:
         rp = reuse_dir / "render-receipt.json"
@@ -855,8 +949,11 @@ def main(argv):
         reasons = []
         if old.get("kind") != "mechanical-docs-render-receipt":
             reasons.append("not a render receipt")
-        if old.get("input_hashes") != project.input_hashes():
-            reasons.append("different input hashes")
+        # the inventory and the supplement never change a pixel: a stock record or a
+        # new supplement row must not force a full re-render
+        skip = project.non_render_inputs()
+        if {k: v for k, v in (old.get("input_hashes") or {}).items() if k not in skip} != project.render_input_hashes():
+            reasons.append("different scene, asset or instruction hashes")
         if old.get("mesh_hashes") != {pid: rec["mesh"]["sha256"] for pid, rec in meshes["parts"].items()}:
             reasons.append("different meshes")
         if old.get("engine") != want_engine:
@@ -871,7 +968,7 @@ def main(argv):
                  "generated_at_utc": old.get("generated_at_utc"), "blender": old.get("blender")}
     t0 = time.time()
     r = Renderer(project, meshes, settings, out_dir, preview, engine, lines)
-    views, missing = r.run(only, groups, reuse)
+    views, missing = r.run(only, groups, reuse, joints)
     reused = [v["id"] for v in views if v.get("reused_from")]
     receipt = {
         "kind": "mechanical-docs-render-receipt", "generated_at_utc": receipts.utc_now(),
@@ -885,7 +982,7 @@ def main(argv):
         "input_hashes": project.input_hashes(), "meshes_json_sha256": receipts.sha256_file(meshes_path),
         "mesh_hashes": {pid: rec["mesh"]["sha256"] for pid, rec in meshes["parts"].items()},
         "partial": bool(missing), "missing_views": missing, "inventory_only": project.instructions is None,
-        "inspection_groups": groups, "reused_from": reuse["receipt_path"] if reuse else None, "reused_views": reused,
+        "inspection_groups": groups, "joint_views": joints, "reused_from": reuse["receipt_path"] if reuse else None, "reused_views": reused,
         "rendered_views": [v["id"] for v in views if not v.get("reused_from")], "views": views,
         "checks": r.checks, "warnings": r.warnings,
         "all_checks_passed": not r.checks["problems"] and all(c["passed"] for c in r.checks["mesh_bounds_match"]) and all(c["passed"] for c in r.checks["restoration"]),

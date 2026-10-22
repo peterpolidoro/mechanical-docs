@@ -21,8 +21,9 @@ tolerances and a physical build are not qualified.
 | `assets/base.step`, `assets/pin.step` | Small derived closed-solid inputs |
 | `scene.json` | Generated draft part/occurrence hierarchy and input hashes |
 | `instructions.json` | Hand-authored three-step example and camera |
-| `inventory.json` | Hand-authored required quantities; actual counts unknown |
-| `render.json` | Illustration settings only (looks); see docs/input-contract.md |
+| `inventory.json` | Hand-authored required quantities; no stock record (the deprecated `counted: null` is kept for the generator receipt's hash) |
+| `supplement.json` | Hand-authored synthetic supplementary items (not modelled in CAD): a candidate family with unknown quantities and a kit `included_with`, a specified SKU with integers, a counted stock record and a scene-part `included_with`, and an unplaced new-design row; all attached to the `pin_to_base` joint and the `pin-pair` group. Nothing in it is real hardware |
+| `render.json` | Illustration settings only (looks, the `pin-pair` inspection view, one `pin_to_base` joint close-up); see docs/input-contract.md |
 | `geometry-validation.json` | Generated FreeCAD export/reimport and placement checks |
 
 From the repository root:
@@ -36,10 +37,14 @@ hand-authored fixture quantities/step IDs against the known scene, but does not
 implement the generic validation library. Later renderer output should go under
 an ignored directory such as `build/three-part-fixture/`.
 
-The manual shows a pictured inventory, placement of the base, insertion of
-pin A, and insertion of pin B. Previously installed parts are subdued, the added
-part is highlighted, and arrows show the intended downward approach. Web and PDF
-are generated from one `manual.json` and checked against each other.
+The manual shows a pictured inventory, the supplementary items table (the two
+existing-design rows; the new-design row only with `--appendix`), the
+`pin-pair` inspection view and the `pin_to_base` joint close-up (pin A and the
+base framed, pin B faded) each with its "hardware to review" list, placement
+of the base, insertion of pin A, and insertion of pin B. Previously installed
+parts are subdued, the added part is highlighted, and arrows show the intended
+downward approach. Web and PDF are generated from one `manual.json` and
+checked against each other.
 
 ```sh
 tools/build-fixture.sh --renderer pixi   # Cycles (bpy wheel) -> build/three-part-fixture/{inspect.json,meshes,renders,manual}

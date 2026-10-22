@@ -7,7 +7,60 @@ CAD geometry and structured procedures, using open-source tools. First deliver
 one useful small example as HTML and PDF, then process the enclosure's accepted
 STEP/assembly exports when available.
 
-## Current checkpoint — 2026-10-22 (technician inventory, subassembly inspection views, unit regression)
+## Current checkpoint — 2026-10-22, second packet (supplementary items, stock record, joint close-ups)
+
+Decisions from the Linux CAD agent (`to-documentation/20261022T161838Z-…`),
+implemented against the three-part fixture first as asked; the enclosure build
+is untouched until the Linux agent writes its CSV mapping and joint overlay.
+
+- [x] `supplement.json` (schema_version integer 1): 23 explicit fields per row,
+  quantities integer or null and never coerced to 0, `included_with` null or a
+  discriminated object (`scene_part` id checked against the scene, `kit` free
+  text), `intended_configuration_confirmed` an explicit boolean, one stock
+  authority (`on_hand_each` with `counted_by`/`counted_date` required when it
+  is a number; `on_order_each` separate), `item_kind` family/sku with family
+  rows forbidden integer quantities, status rules (`covered` needs
+  `included_with`; `specified` needs sku + supplier part number + verified),
+  `attaches_to` validated against assembly/occurrence ids with `[]` allowed.
+  Loaded with the other manifests, hashed into every receipt, summarised by
+  `inspect`.
+- [x] Inventory stock record: optional `on_hand_each`, `counted_by`,
+  `counted_date`, `stock_location`, `intended_configuration_confirmed` per
+  item with the same rules; the deprecated `counted` key is accepted only as
+  null and `inventory-template` no longer writes it. The printed counted box
+  is paper only; recorded stock prints as text on the card; the configuration
+  flag prints beside the coincident finding and is never derived from it.
+- [x] Printing: a separate "Supplementary items (not modelled in CAD)" section
+  (scope `existing`), "Hardware to review at this joint (not an approved BOM)"
+  under each subassembly whose id or descendants a row attaches to and under
+  each joint close-up sharing the row's `joint_id`, never inside a parts table;
+  `new_design` rows in the appendix only; the status block says supplementary
+  quantities are never added to CAD quantities; the appendix prints every
+  field of every row. `check` compares HTML, PDF and `manual.json` for the
+  rows and the lists and confirms no row collides with a CAD part id.
+- [x] `joint_views` in `render.json`: `joint_id`, `occurrence_ids`, optional
+  `direction`, `context` (default deepest common ancestor), `context_style`
+  faded/hidden, `id`; the view frames the union bounds of the listed
+  occurrences at canonical poses with the rest of the context subdued; the
+  receipt carries joint id, occurrence ids, context assembly and context
+  occurrences; one page per joint, labelled an inspection view, not a step.
+- [x] Fixture: three supplementary rows (a family with null quantities and a
+  kit `included_with`, a specified SKU with integers, a counted stock record
+  and a scene-part `included_with`, an unplaced new-design row), the
+  `pin-pair` inspection view and a `pin_to_base` close-up; negative tests for
+  a bare-string `included_with`, zero coercion, unknown ids, a family with an
+  integer quantity, a count without `counted_by`, string booleans, status
+  rules, duplicate ids, the schema version. 102 pure-Python tests, 2
+  FreeCAD-gated.
+- [x] Enclosure built with the Linux agent's overlay (17:03 UTC:
+  `render.json` with the six groups and 16 `joint_views`, `inventory.json` with
+  a stock record on all 37 parts, `supplement.json` with 20 family rows, 16
+  existing / 4 new design): 16 joint close-ups rendered, 51 views reused
+  from the 14:12 receipt in 838 s; compact PDF 36 pages, appendix 54 pages,
+  23 checks passed each, none failed. Receipt checks scoped per stage so the
+  new inventory and supplement did not force a CAD or full render re-run.
+
+## Previous checkpoint — 2026-10-22 (technician inventory, subassembly inspection views, unit regression)
 
 Work packet from the Linux CAD agent (`to-documentation/20261022T131939Z-…`),
 done while Peter was away; all output stays `draft`.
@@ -53,9 +106,10 @@ done while Peter was away; all output stays `draft`.
   the CAD count of 3 is flagged, no source instance deleted); an interface for a
   supplementary (non-geometric) inventory proposed in the mailbox, not
   implemented until the Linux agent confirms the field names.
-- [ ] Peter's review of the new inventory pages; the project team's choice of
-  which further group instances need inspection views; the supplementary
-  inventory contract (after the Linux agent's answer).
+- [x] Supplementary inventory contract answered by the Linux agent (16:18 UTC)
+  and implemented in the second packet above; no further group instances
+  beyond `:1` for now.
+- [ ] Peter's review of the new inventory pages.
 
 ## Previous checkpoint — 2026-10-21 (first implementation session, Cycles follow-up, first production snapshot)
 
@@ -130,28 +184,26 @@ done while Peter was away; all output stays `draft`.
 
 ## Next implementation sequence
 
-1. Review the picture-led inventory and subassembly pages with Peter: card
-   size, labels, inch equivalents, which long parts need the end view, which
-   McMaster rows lack part numbers, and whether purchased kits need a separate
-   inventory classification.
-2. Ask the project team for a first reviewed sequence (one subassembly, e.g. the
+1. Build the enclosure with the Linux agent's `supplement.json` (20 family
+   rows from its CSV mapping) and `joint_views` overlay (instances and
+   directions per joint id) when they arrive; review the supplementary
+   section and the per-joint close-ups; report. Nothing of either is invented
+   here.
+2. Review the picture-led inventory, subassembly pages and the supplementary
+   section with Peter: card size, labels, inch equivalents, which long parts
+   need the end view, which McMaster rows lack part numbers.
+3. Ask the project team for a first reviewed sequence (one subassembly, e.g. the
    caster or panel assembly that already has an inspection view) and author
-   `instructions.json` for it; add per-step close-ups, tools and checkpoints to
-   the instruction model.
-3. Evaluate Grease Pencil Line Art in background mode against Freestyle on the
+   `instructions.json` for it; add per-step view overrides, tools and
+   checkpoints to the instruction model.
+4. Evaluate Grease Pencil Line Art in background mode against Freestyle on the
    enclosure overview (32 min with Freestyle at 2.4 M triangles, 51 s without);
    full-assembly views stay without outlines under the 400 000-triangle budget
    until then. Not blocking.
-4. Inspection views for further group instances when the project team names
-   them (CASTER ASSEMBLY:2-4, the frames); a camera direction per group in
-   `render.json` if the default direction hides something.
-5. Supplementary inventory (hardware not modelled in CAD, consumables, tools)
-   as a separate validated manifest derived from the project's procurement
-   sheets: listed per joint under the subassembly pages, quantities unknown
-   until confirmed, never summed with CAD counts, no geometry invented.
-   Implement once the Linux agent confirms the proposed field names.
-6. Add close-ups (per-step view override) and the static fallback for
-   interactive extras in a MkDocs page.
+5. Further group instances only when the project team names them (none beyond
+   `:1` for now); a camera direction per group in `render.json` if the default
+   direction hides something.
+6. The static fallback for interactive extras in a MkDocs page.
 7. Reproduce one or two joystick atlas views through the generic renderer as a
    regression; decide where shared materials live (kicad-libs overlap).
 8. Review printed pages with a technician; add the physical-validation record
@@ -177,19 +229,73 @@ done while Peter was away; all output stays `draft`.
   not in Git; its `render.json` (line budget, inspection groups) is project
   configuration and goes to the Linux agent as an overlay through the mailbox.
 - Subassembly inspection views are parts views: canonical poses, nothing
-  exploded, hidden or reordered, labelled as not a step. The Windows two-panel
-  exporter fixture is no longer needed as a tracked inch example: the units
-  fixture provides a real inch STEP without copying project data.
+  exploded, hidden or reordered, labelled as not a step. Joint close-ups frame
+  named occurrences and subdue or hide the rest of their context; they too are
+  inspection views, never steps. The Windows two-panel exporter fixture is no
+  longer needed as a tracked inch example: the units fixture provides a real
+  inch STEP without copying project data.
+- Supplementary items are a separate manifest produced by the project's
+  recipe, validated and printed here, never read from the project's sheets,
+  never drawn, never added to CAD quantities; an unknown quantity stays null
+  and prints as unknown. The one stock authority is `on_hand_each` with its
+  attribution; the printed counted box is paper only. A family row cannot
+  carry an integer quantity; a `specified` row needs a verified supplier part
+  number. Rows with `scope: new_design` are appendix-only.
 - Cycles with OpenImageDenoise is the reference look and the default engine
   (Peter's expectation; matches the joystick atlas). EEVEE Next is for previews
   and for the Guix Blender, which lacks the denoiser; receipts record both.
+- Receipt checks are scoped to what a stage depends on: meshes.json is compared
+  with the scene and asset hashes; `--reuse` and the manual stage compare
+  render receipts with the scene, asset and instruction hashes (plus meshes,
+  engine and quality for reuse). A changed inventory or supplement therefore
+  never forces a CAD or render re-run (neither file changes a pixel); the
+  manual re-reads both, and every receipt still records every input hash.
+- Project prose stays in the project: `inventory.json` may carry `notes`
+  (sentences printed verbatim on the status block, e.g. an intended build
+  change), produced by the project recipe; nothing of the kind is authored in
+  this repository.
 - Track compact inputs; large generated outputs stay in `build/` or the evidence share.
 - Native CAD acceptance, stock counts and the real assembly order remain the
   project team's; the fixtures prove tooling, not an enclosure procedure.
 
 ## Verification and handoff
 
-Observed on 2026-10-22 (Debian 13 host, Guix 1.5.0, Pixi 0.63.2): Python 3.12.12,
+Enclosure build with the Linux overlay, observed on 2026-10-22 (same host and
+tools): overlay files verified against their SHA256SUMS and staged beside the
+accepted scene in the ignored copy; `inspect` 20 supplement rows, coincident
+tank still a finding; 16 joint close-ups rendered in 838 s with 51 views reused
+(18 to 118 s each; 6 of 16 with outlines, 10 over the 400 000-triangle budget:
+frame contexts 472 340 and 546 280 triangles, root contexts 2 436 488); poses
+restored and verified after every view; compact PDF 36 pages and appendix 54
+pages, 23 checks passed and 2 not applicable each; the parts card grew to
+84 mm (picture 34 mm, text 16 mm) so the stock record and configuration flag
+fit above the quantity row. By eye: 5 close-ups show the attachment with
+outlines, 4 are usable without, 7 do not show it (listed per view in the
+reply with extents and causes). Fixture manuals rebuilt, all checks pass;
+103 pure-Python tests. Evidence
+`evidence/2026-10-22-documentation-enclosure-supplement-01/` (complete
+compact package, appendix package without the identical images, 16 new
+renders, contact sheets, receipts, logs).
+
+Second packet, observed on 2026-10-22 (same host and tools): 102 pure-Python
+tests pass (2 FreeCAD-gated skipped outside the CAD role; both pass in it).
+Three-part fixture rebuilt end to end with Cycles and the denoiser: 10 views
+in 255 s (the `pin-pair` inspection view 59 s, the `pin_to_base` close-up 57 s
+at 1164 visible triangles with outlines, canonical poses restored and verified
+after every view); compact PDF 9 pages and appendix PDF 10 pages, 25 checks
+passed each (the new ones: HTML joint sections, HTML supplementary rows,
+per-group and per-joint hardware lists, PDF joint headings, PDF supplementary
+item ids present with new-design ids absent from the compact document,
+supplementary rows separate from CAD parts). The two-bases and units manuals
+were rebuilt from their existing renders with the new document code: all
+checks pass. Pages inspected by eye: status block, parts cards with the paper
+box, the supplementary table, the subassembly and joint pages with their
+hardware lists, the appendix table of every field. Enclosure build untouched
+(Linux's instruction). Evidence:
+`evidence/2026-10-22-documentation-supplement-01/`; reply
+`to-linux/20261022T164917Z-…`; `status/documentation.json` refreshed.
+
+First packet, observed on 2026-10-22 (Debian 13 host, Guix 1.5.0, Pixi 0.63.2): Python 3.12.12,
 pytest 9.0.2 (84 passed, 2 skipped outside the CAD role; the 2 FreeCAD-gated
 tests pass in `guix shell -m manifest.scm -m .guix/manifest-cad.scm`), FreeCAD
 1.1.3, bpy 4.5.14 (Cycles, OpenImageDenoise), Typst 0.15.0, Poppler 22.09.

@@ -1,8 +1,16 @@
 {
   "schema_version": "draft-1",
-  "note": "Illustration settings only: looks and image sizes. Nothing here changes geometry, identity, quantities or order.",
+  "note": "Illustration settings only: looks, image sizes and which inspection views exist. Nothing here changes geometry, identity, quantities or order.",
   "looks": {
     "base": "aluminium",
     "pin": "blue-anodized"
-  }
+  },
+  "inspection_groups": ["pin-pair"],
+  "joint_views": [
+    {
+      "joint_id": "pin_to_base",
+      "occurrence_ids": ["pin-a", "base-1"],
+      "direction": [1.0, -1.2, 0.8]
+    }
+  ]
 }

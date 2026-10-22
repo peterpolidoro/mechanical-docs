@@ -84,8 +84,10 @@ stage 2 min 22 s, thumbnails 9.5 to 23 s each, overview 51 s without lines and
 is still too slow for step views; it has not been tried in background mode here.
 
 Two mechanisms keep a production rebuild short. `render.py --reuse DIR` copies
-every planned view that an earlier complete receipt holds for the same input
-hashes, mesh hashes, engine and quality (image hash re-verified, `reused_from`
+every planned view that an earlier complete receipt holds for the same scene,
+asset and instruction hashes, mesh hashes, engine and quality (the inventory
+and the supplement never change an image, so a new stock record or supplement
+row does not invalidate a receipt; image hash re-verified, `reused_from`
 and `reused_generated_at_utc` on the view record naming the receipt that
 rendered it; a view copied again in a later pass keeps that original
 provenance and lists the intermediate receipts in `reused_via`) and renders
@@ -97,6 +99,15 @@ only the views named in `--views` or absent from that receipt; the enclosure's p
 (1600 × 1200, floor, Freestyle on 55 000 to 91 000 visible triangles) 62 to
 82 s each; 17 views rendered and 31 reused in 6 min 25 s for the whole receipt,
 against 39 min for the full first render.
+
+A joint close-up (`joint_views`) costs about what a subassembly view costs
+at the same size: on the three-part fixture at 1600 × 1200 with the floor,
+the `pin_to_base` close-up (two subject occurrences, one faded context
+occurrence, Freestyle on) took 57 s against 59 s for the `pin-pair`
+inspection view and 58 s for the overview (Cycles, denoiser, 64 adaptive
+samples; the floor's second pass dominates on so small a scene). On the
+enclosure a close-up of a few parts will stay well under the line budget, so
+it renders with outlines even where the frame views do not.
 
 ## Typst and Poppler
 

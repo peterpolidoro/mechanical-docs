@@ -68,10 +68,80 @@ no promise of collision-free motion. Rendering must restore canonical placements
 
 ## Inventory (`inventory.json`)
 
-Each row names a part ID, required quantity, unit, and `counted` value. Null means
-not counted. The example's one base and two pins are synthetic required quantities,
-not available physical stock. Future production inventory must distinguish kits,
-installed items, spares and consumables as described in the requirements.
+Each row names a part ID, required quantity and unit. The example's one base
+and two pins are synthetic required quantities, not available physical stock.
+A row may carry the optional **stock record** (recipe-produced, decided with
+the Linux CAD agent on 2026-10-22): `on_hand_each` (integer, or null meaning
+unknown, which is distinct from 0) with `counted_by` and `counted_date`
+(ISO date) required whenever it is a number, `stock_location` (optional
+text), and `intended_configuration_confirmed`, an explicit boolean that is
+required on every row carrying any stock field. `on_hand_each` is the one
+stock authority; the printed `counted` box is paper only and is not a data
+field. The older `counted` key is accepted only as `null` (deprecated) so
+existing files still load; a number there is rejected with a pointer to
+`on_hand_each`. The coincident-occurrence finding is printed beside
+`intended_configuration_confirmed` and never sets or derives it. An optional
+top-level `notes` list of sentences (project-authored, recipe-produced) prints
+on the status block verbatim as "Project note: …", for statements such as an
+intended build change; this repository never authors such sentences.
+
+## Supplement (`supplement.json`, optional)
+
+Items that are **not modelled in CAD** (hardware, consumables, purchased
+items), produced by the project's recipe from its procurement sheets; the
+renderer never reads the sheets. `schema_version` is the integer `1`. Top
+level: `schema_version`, `scene` (relative path to the loaded scene), `status`
+(free text, optional), `source` (optional object of scalar provenance values)
+and `items`. Every row carries **every one of these 23 fields explicitly**
+(null where unknown; an absent field is an error, never 0 or null):
+
+| Field | Rule |
+| --- | --- |
+| `item_id` | unique identifier |
+| `joint_id` | identifier: the project's stable joint key (not validated against the scene) |
+| `scope` | `existing` (printed in the technician document) or `new_design` (appendix only) |
+| `item_kind` | `family` (a candidate family, no SKU) or `sku` |
+| `status` | `candidate_requires_review`, `not_required`, `covered` or `specified` |
+| `candidate_item_family` | text or null; required for a family row |
+| `quantity_basis` | text or null: the only quantity information a family row may carry |
+| `confirmed_required_each` | integer ≥ 0 or null (unknown); must be null for a family row |
+| `on_hand_each` | integer ≥ 0 or null (unknown, distinct from 0); the one stock authority |
+| `counted_by` | text or null; required when `on_hand_each` is a number, otherwise must be null |
+| `counted_date` | ISO date or null; same rule as `counted_by` |
+| `stock_location` | text or null |
+| `on_order_each` | integer ≥ 0 or null; must be null for a family row |
+| `included_with` | null, `{"kind": "scene_part", "id": <scene part id, must exist>}` or `{"kind": "kit", "name": <free text>}`; never a bare string; no other keys |
+| `intended_configuration_confirmed` | explicit boolean (required) |
+| `attaches_to` | list of scene assembly and/or occurrence ids, each existing, none repeated; `[]` allowed (unplaced) |
+| `specification` | text or null; a row needs `candidate_item_family` or `specification` to be printable |
+| `supplier_part_number` | text or null |
+| `supplier_specification_verified` | explicit boolean; `true` requires a `supplier_part_number` |
+| `unit_cost` | number ≥ 0 or null; a number requires `currency` |
+| `currency` | text or null |
+| `evidence` | text or null |
+| `next_check` | text or null |
+
+Status rules: `covered` requires a non-null `included_with`; `specified`
+requires `item_kind: sku`, a `supplier_part_number` and
+`supplier_specification_verified: true`. No quantity is ever coerced: a
+string, an empty string, a float or a boolean in a quantity field is an error.
+Unknown fields, a duplicate `item_id`, a wrong schema version and a `scene`
+that is not the loaded scene are rejected; all problems are reported together.
+
+Printing: nothing in the supplement is geometry, nothing is drawn for it, and
+no supplementary quantity is ever added to a CAD quantity (the status block
+says so). Rows with `scope: existing` print in a separate section
+"Supplementary items (not modelled in CAD)" with a dashed `S<n>` badge, the
+family or specification, the kind and status, `required …` (unknown printed
+as unknown), the stock record, `included with …`, the configuration flag and
+a paper count box. A row whose `attaches_to` is a subassembly, or lies under
+it, is also listed on that subassembly's inspection page as "Hardware to
+review at this joint (not an approved BOM)", never inside the parts table; a
+row is listed on a joint close-up page when its `joint_id` is the view's.
+Rows with `scope: new_design` print in the technical appendix only, which
+prints every field of every row. `manual.json` carries every row and the
+group/joint mapping; `check` compares HTML, PDF and `manual.json` for the
+printed rows and lists.
 
 ## Receipts and checks
 
@@ -96,7 +166,8 @@ everything else with one combined error listing every problem. Accepted:
 | --- | --- |
 | scene | `schema_version` (`draft-1`), `id`, `title`, `units` (mm, cm, m, in), `coordinate_system` (`handedness` must be `right`, `up_axis` must be `+Z`, `origin`), `source` (`kind`, `generator`, `qualification`, `revision`, `exporter`, `exported_at`), `parts[]` (`id`, `name`, `asset{path, format=step, units, sha256}`, `identifying_dimensions_mm`, `description`), `assemblies[]` (`id`, `parent_id`, `transform`, `name`), `occurrences[]` (`id`, `part_id`, `parent_id`, `transform`, `name`) |
 | instructions | `schema_version`, `scene`, `id`, `title`, `review_state` (draft, cad-reviewed, physically-validated), `views[]` (`id`, `projection`, `eye`, `target`, `up`), `steps[]` (`id`, `requires`, `add`, `view`, `caption`, `approach{occurrence_id, start_offset, end_offset, validation}`) |
-| inventory | `schema_version`, `scene`, `status`, `items[]` (`part_id`, `required`, `unit`, `counted`) |
+| inventory | `schema_version`, `scene`, `status`, `notes[]` (optional project sentences for the status block), `items[]` (`part_id`, `required`, `unit`; optional stock record `on_hand_each`, `counted_by`, `counted_date`, `stock_location`, `intended_configuration_confirmed`; deprecated `counted`, null only) |
+| supplement | `schema_version` (integer 1), `scene`, `status`, `source`, `items[]` with the 23 fields listed under *Supplement* |
 
 ### Production fields (accepted since 2026-10-21, after the first Windows per-part export)
 
@@ -205,18 +276,40 @@ inspection view is never an assembly step: nothing is exploded, hidden or
 reordered inside the group, and the receipt records the group's occurrence
 ids, parent and path.
 
+`joint_views` (added 2026-10-22 for per-joint close-ups) is a list of objects:
+`joint_id` (the project's joint key, required), `occurrence_ids` (the specific
+occurrences forming the joint, required, each must exist, none repeated),
+optional `direction` (three numbers; otherwise `joint_direction` with the
+flat-group facing rule), optional `context` (an assembly id containing every
+listed occurrence; default the occurrences' deepest common ancestor), optional
+`context_style` (`faded`, the default from `joint_context_style`, draws the
+context's other occurrences as flat grey silhouettes with thin outlines;
+`hidden` leaves them out) and optional `id` (when one joint needs several
+views; the image is `joint-<id or joint_id>.png`). The view frames the union
+bounds of the listed occurrences at their canonical poses, everything outside
+the context is hidden, the camera sits outside the whole scene so nothing is
+cut, and the receipt records the joint id, the occurrence ids, the context
+assembly, the context occurrences and the hidden ones. `joint_fill` sets the
+framing margin. These are inspection views, not steps: nothing moves and no
+fastener is drawn.
+
 ### Stage outputs
 
 | File | Written by | Content |
 | --- | --- | --- |
-| `inspect.json` | `python3 -m mechanical_docs inspect` | validated parts, occurrences with world transforms, steps with cumulative state, inventory reconciliation, input hashes |
+| `inspect.json` | `python3 -m mechanical_docs inspect` | validated parts, occurrences with world transforms, steps with cumulative state, inventory reconciliation with stock records, the supplement's rows and summary (by scope, kind, status; unknown quantities; unplaced rows), input hashes |
 | `meshes/<part>.glb`, `meshes/meshes.json` | `cad_mesh.py` (FreeCADCmd) | one GLB per part (metres, +Y up, conversion recorded in the asset extras), declared STEP unit versus manifest unit, STEP validity/bounds/volume, mesh winding and volume checks, tessellation attempts under the per-part triangle budget, hashes |
-| `renders/*.png`, `renders/hotspots/*.json`, `renders/render-receipt.json` | `render.py` (Blender) | thumbnails (wide ones plus end views for long parts), overview, subassembly inspection views (`group-*.png` with occurrence ids, parent and path), step and result images; projected occurrence boxes; versions, engine, denoiser, settings hash, per-view hashes, visible triangles and whether line art was drawn, which views were copied from an earlier receipt (`--reuse`, same inputs/meshes/engine only, `reused_from` per view), mesh-bounds and pose-restoration checks |
-| `manual/manual.json`, `index.html`, `manual.typ`, `<id>.pdf`, `build-receipt.json` | `python3 -m mechanical_docs manual [--appendix]` | the single document model and both outputs generated from it: picture-led parts cards (CAD quantity labelled as such, blank counted box), one page per subassembly inspection view, overview, steps, a compact build record; `--appendix` adds the technical appendix (full part ids, Vault ids, occurrence lists, every hash), which manual.json always carries |
-| `manual/check-report.json`, `manual/checks/` | `python3 -m mechanical_docs check` | HTML/PDF/manual.json agreement (parts, CAD quantities, subassembly sections and their part counts, step order), link and image resolution, page rasters and greyscale copies |
+| `renders/*.png`, `renders/hotspots/*.json`, `renders/render-receipt.json` | `render.py` (Blender) | thumbnails (wide ones plus end views for long parts), overview, subassembly inspection views (`group-*.png` with occurrence ids, parent and path), joint close-ups (`joint-*.png` with joint id, occurrence ids, context assembly and context occurrences), step and result images; projected occurrence boxes; versions, engine, denoiser, settings hash, per-view hashes, visible triangles and whether line art was drawn, which views were copied from an earlier receipt (`--reuse`: same scene, assets, instructions, meshes and engine; the inventory and supplement may differ; `reused_from` per view), mesh-bounds and pose-restoration checks |
+| `manual/manual.json`, `index.html`, `manual.typ`, `<id>.pdf`, `build-receipt.json` | `python3 -m mechanical_docs manual [--appendix]` | the single document model and both outputs generated from it: picture-led parts cards (CAD quantity labelled as such, stock record when recorded, paper count box), the supplementary items section (existing-design rows), one page per subassembly inspection view and per joint close-up with their "hardware to review" lists, overview, steps, a compact build record; `--appendix` adds the technical appendix (full part ids, Vault ids, occurrence lists, every hash, every supplement row and field, stock records), which manual.json always carries |
+| `manual/check-report.json`, `manual/checks/` | `python3 -m mechanical_docs check` | HTML/PDF/manual.json agreement (parts, CAD quantities, subassembly sections and their part counts, joint sections, supplementary rows and the per-group/per-joint hardware lists, step order; supplementary rows separate from CAD parts with unknown quantities kept unknown), link and image resolution, page rasters and greyscale copies |
 
-Each stage refuses inputs whose hashes differ from the receipt it consumes, and
-refuses receipts that report failed checks or partial renders.
+Each stage refuses inputs whose hashes differ from the receipt it consumes for
+the inputs that stage depends on: the render stage compares meshes.json with
+the scene and asset hashes, `--reuse` and the manual stage compare render
+receipts with the scene, asset and instruction hashes (a recorded stock
+count or a new supplement row needs a new manual, never a new render), and
+every receipt still records every input hash. Receipts that report failed
+checks or partial renders are refused.
 
 ## Exporter fields requested from the Windows adapter
 
