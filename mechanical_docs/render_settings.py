@@ -42,7 +42,7 @@ DEFAULTS = {
     # The catcher costs Cycles a second full pass (about 4x the view time), so by
     # default only the part thumbnails and the overview get it; add "step" and
     # "step-result" to `views` for the step images too.
-    "floor": {"enabled": "auto", "views": ["part-thumbnail", "overview"], "color": [0.46, 0.47, 0.49], "roughness": 0.9, "size_factor": 40},
+    "floor": {"enabled": "auto", "views": ["part-thumbnail", "overview", "group"], "color": [0.46, 0.47, 0.49], "roughness": 0.9, "size_factor": 40},
     "long_side_px": 1600,
     "preview_long_side_px": 480,
     "thumbnail_px": 600,
@@ -50,6 +50,20 @@ DEFAULTS = {
     "fill": 0.86,
     "thumbnail_fill": 0.78,
     "thumbnail_direction": [1.0, -1.2, 0.9],
+    # A long part (longest extent at least `thumbnail_long_aspect` times the next) is
+    # turned so its long axis runs along X and drawn in a wide image from
+    # `thumbnail_long_direction`; a second image looks straight along the axis
+    # (part-<id>-end.png: the profile/end detail that identifies an extrusion).
+    "thumbnail_long_aspect": 4.0,
+    "thumbnail_long_px": 1200,
+    "thumbnail_long_aspect_px": [2, 1],
+    "thumbnail_long_direction": [0.35, -1.0, 0.55],
+    "thumbnail_end_view": True,
+    # Isolated inspection views of subassemblies (assembly ids), occurrences at
+    # their canonical poses: parts views, not assembly steps. --groups adds to this.
+    "inspection_groups": [],
+    "group_direction": [1.0, -1.2, 0.8],
+    "group_fill": 0.84,
     "overview_direction": [1.0, -1.2, 0.8],   # used when a project has no instructions (inventory only)
     "film_transparent": True,
     "view_transform": "Standard",
@@ -81,7 +95,8 @@ DEFAULTS = {
 
 # render.json may set these top-level keys; palette entries may be added, not the whole palette replaced.
 OVERRIDABLE = {"engine", "samples", "preview_samples", "cycles_samples", "cycles_preview_samples", "cycles_adaptive_threshold", "cycles_max_bounces", "cycles_persistent_data", "floor", "long_side_px", "preview_long_side_px", "thumbnail_px", "aspect", "fill",
-               "thumbnail_fill", "thumbnail_direction", "overview_direction", "film_transparent", "view_transform", "look", "exposure", "world", "studio",
+               "thumbnail_fill", "thumbnail_direction", "thumbnail_long_aspect", "thumbnail_long_px", "thumbnail_long_aspect_px", "thumbnail_long_direction", "thumbnail_end_view",
+               "inspection_groups", "group_direction", "group_fill", "overview_direction", "film_transparent", "view_transform", "look", "exposure", "world", "studio",
                "default_look", "looks", "context_color", "lines", "arrow", "palette", "note", "schema_version"}
 
 
@@ -112,6 +127,8 @@ def load_settings(project_dir):
             s[k] = v
     if not isinstance(s["looks"], dict) or any(not isinstance(x, str) for x in s["looks"].values()):
         raise SettingsError("render.json: looks must map part id -> look name")
+    if not isinstance(s["inspection_groups"], list) or any(not isinstance(x, str) for x in s["inspection_groups"]):
+        raise SettingsError("render.json: inspection_groups must be a list of assembly ids")
     unknown = sorted(set(s["looks"].values()) - set(s["palette"]))
     if unknown:
         raise SettingsError(f"render.json: unknown look(s) {unknown}; palette has {sorted(s['palette'])}")

@@ -5,12 +5,15 @@ and structured project information. The first use case is a visual parts invento
 and LEGO-style assembly manual, with matching web and printable PDF versions.
 Future uses include maintenance, replacement, disassembly and inspection guides.
 
-**Status: first working slice on synthetic fixtures; first production snapshot loads (2026-10-21).** A validated
-draft-1 manifest loader, a FreeCAD STEP-to-mesh stage, a Blender render stage
-(Cycles with OpenImageDenoise through the `bpy` wheel, EEVEE on the Guix Blender),
-and a document stage that writes one `manual.json` and generates HTML and a Typst
-PDF from it, with an output checker. Two synthetic fixtures build end to end.
-No production CAD has been processed, and no procedure is physically validated.
+**Status: inventory-only manuals from the first production snapshot; technician-facing
+layout and subassembly inspection views (2026-10-22).** A validated draft-1 manifest
+loader, a FreeCAD STEP-to-mesh stage, a Blender render stage (Cycles with
+OpenImageDenoise through the `bpy` wheel, EEVEE on the Guix Blender), and a
+document stage that writes one `manual.json` and generates HTML and a Typst PDF
+from it, with an output checker. Three synthetic fixtures build end to end, and
+the enclosure snapshot (37 parts, 155 occurrences) builds as a draft parts
+inventory with subassembly inspection views. No assembly sequence has been
+authored or reviewed for production geometry, and nothing is physically validated.
 
 ## Start here
 
@@ -22,7 +25,8 @@ An incoming agent should read [AGENTS.md](AGENTS.md), then:
    including the implemented subset and the fields requested from the CAD exporter.
 4. [Existing tools to reuse](docs/reuse.md): what was extracted from the joystick atlas and what was not.
 5. [Environment](docs/environment.md), the [living plan](.agents/PLANS.md) and the fixtures:
-   [three-part](examples/three-part-fixture/README.md), [two-bases](examples/two-bases-fixture/README.md).
+   [three-part](examples/three-part-fixture/README.md), [two-bases](examples/two-bases-fixture/README.md),
+   [units](examples/units-fixture/README.md) (a real inch STEP, a centimetre STEP, an inch Y-up scene).
 
 ## Pipeline
 
@@ -34,9 +38,11 @@ validated manifests   GLB per part + meshes.json    PNGs + render-receipt.json  
 ```sh
 tools/build-fixture.sh --renderer pixi                   # all stages, Cycles via the bpy wheel -> build/three-part-fixture/
 tools/build-fixture.sh examples/two-bases-fixture --renderer pixi
+tools/build-fixture.sh examples/units-fixture --renderer pixi --appendix   # inch/cm/mm assets; prints the technical appendix too
 tools/build-fixture.sh                                   # Guix Blender: EEVEE (that package has no denoiser)
 tools/build-fixture.sh . --preview                       # small fast images
-guix shell --pure -m manifest.scm -- python3 -B -m pytest -q tests
+guix shell --pure -m manifest.scm -- python3 -B -m pytest -q tests                                   # pure-Python suite
+guix shell --pure -m manifest.scm -m .guix/manifest-cad.scm -- python3 -B -m pytest -q tests/test_cad_stage.py   # FreeCAD unit checks
 ```
 
 The Pixi route needs `pixi install -e render` once (and, inside a Guix shell,
@@ -48,11 +54,22 @@ Or stage by stage, each in its Guix role (see [docs/environment.md](docs/environ
 python3 -m mechanical_docs inventory-template PROJECT      # draft inventory.json from a scene (required = installed occurrences)
 python3 -m mechanical_docs inspect examples/three-part-fixture --json build/inspect.json
 FreeCADCmd mechanical_docs/cad_mesh.py --pass examples/three-part-fixture build/meshes [--max-triangles 50000]
-pixi run -e render render examples/three-part-fixture build/meshes/meshes.json build/renders [--preview] [--engine BLENDER_EEVEE_NEXT] [--no-lines]
+pixi run -e render render examples/three-part-fixture build/meshes/meshes.json build/renders [--preview] [--engine BLENDER_EEVEE_NEXT] [--no-lines] [--groups pin-pair] [--reuse build/renders-old]
 blender -b --python mechanical_docs/render.py -- examples/three-part-fixture build/meshes/meshes.json build/renders --engine BLENDER_EEVEE_NEXT
-python3 -m mechanical_docs manual examples/three-part-fixture --renders build/renders --out build/manual --meshes build/meshes/meshes.json
+python3 -m mechanical_docs manual examples/three-part-fixture --renders build/renders --out build/manual --meshes build/meshes/meshes.json [--appendix]
 python3 -m mechanical_docs check build/manual
 ```
+
+`--groups` (or `inspection_groups` in `render.json`) renders named subassemblies
+alone as inspection views; `--reuse` copies views from an earlier complete
+receipt made from the same inputs, meshes and engine, so changing a few
+thumbnails does not mean rendering the whole assembly again (each copied view
+is marked `reused_from` in the receipt). `--appendix` prints the technical
+appendix; without it the printed document stays compact and the full
+identities live in `manual.json` and `build-receipt.json`. Two occurrences of
+one part at the same pose are kept and counted but reported as a finding on
+the status block and the part's card (a CAD ambiguity to review before the
+count becomes stock).
 
 Every stage writes a receipt with input hashes and tool versions and refuses
 inputs whose hashes do not match the receipt it consumes. `build/` is ignored
@@ -67,13 +84,19 @@ provenance, BOM structure, flexible-instance flags); see the contract.
 
 ## What the manual contains
 
-A status block with the review state, a parts table (thumbnail, label, name,
-identifying dimensions, required quantity, a box for the quantity found), the
-finished assembly with web-only clickable callouts, one page per step (parts
-needed with quantities, the step image with the previous parts subdued and the
-new part highlighted, an approach arrow and a result image when the step has a
-hint), and a build record with hashes and versions. The checker compares HTML,
-PDF and `manual.json` for the same inventory, quantities and step order.
+A status block with the review state; picture-led parts cards (badge, a large
+picture, or a wide picture plus an end view for long profiles and panels, a
+short label, the overall size with inch equivalents for inch parts, the CAD
+quantity labelled as a CAD instance count rather than a purchase quantity, and
+a blank box for the counted quantity); one page per subassembly inspection
+view (the group's parts at their CAD positions with a parts list, explicitly
+not an assembly step); the finished assembly with web-only clickable
+callouts; one page per step (parts needed with quantities, the step image with
+the previous parts subdued and the new part highlighted, an approach arrow and
+a result image when the step has a hint); a compact build record; and, with
+`--appendix`, a technical appendix with full part ids, Vault ids, occurrence
+lists and every hash. The checker compares HTML, PDF and `manual.json` for the
+same inventory, CAD quantities, subassembly sections and step order.
 
 ## Ownership
 

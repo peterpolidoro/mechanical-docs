@@ -277,3 +277,20 @@ def test_require_instructions_flag(project_copy):
     (project_copy.dir / "instructions.json").unlink()
     with pytest.raises(ManifestError, match="instructions: file not found"):
         load_project(project_copy.dir, require_instructions=True)
+
+
+def test_coincident_occurrences_are_a_finding_not_an_error(project_copy):
+    """Two pins at the same world pose: kept, counted, and reported for review."""
+    project_copy.edit("scene.json", lambda d: d["occurrences"][2].__setitem__("transform", d["occurrences"][1]["transform"]))
+    pr = load_project(project_copy.dir)          # inventory still requires 2 pins: both instances count
+    sc = pr.scene
+    assert len(sc.coincident) == 1
+    assert sc.coincident[0]["part_id"] == "pin" and sorted(sc.coincident[0]["occurrences"]) == ["pin-a", "pin-b"]
+    assert sc.coincident[0]["max_deviation"] == 0
+    assert sc.coincident_of("base") == []
+    assert len(load_project(FIXTURE_DIR_FOR_COINCIDENT()).scene.coincident) == 0
+
+
+def FIXTURE_DIR_FOR_COINCIDENT():
+    from pathlib import Path
+    return Path(__file__).resolve().parents[1] / "examples" / "three-part-fixture"

@@ -3,15 +3,16 @@
     inspect PROJECT_DIR [--json OUT]   validate the manifests, report parts,
                                        occurrences, world transforms and hashes
     inventory-template PROJECT_DIR     draft inventory.json from the scene
-    manual  PROJECT_DIR --renders DIR --out DIR [--render-receipt FILE] [--meshes FILE]
+    manual  PROJECT_DIR --renders DIR --out DIR [--meshes FILE] [--appendix]
                                        build manual.json, the HTML manual and the
-                                       Typst source; compile the PDF when typst is found
+                                       Typst source; compile the PDF when typst is found;
+                                       --appendix prints full identities and hashes
     check   OUT_DIR                    compare HTML, PDF and manual.json; verify links/images
 
 The CAD and render stages run inside their host applications:
 
     FreeCADCmd mechanical_docs/cad_mesh.py PROJECT_DIR OUT_DIR
-    blender -b --python mechanical_docs/render.py -- PROJECT_DIR MESHES_JSON OUT_DIR [--preview]
+    blender -b --python mechanical_docs/render.py -- PROJECT_DIR MESHES_JSON OUT_DIR [--preview] [--groups A,B] [--reuse DIR]
 """
 from __future__ import annotations
 
@@ -66,6 +67,7 @@ def inspect_report(project):
         "inventory_status": inv.status,
         "counts": {"part_types": len(sc.parts), "assemblies": len(sc.assemblies), "occurrences": len(sc.occurrences),
                    "reference_only_occurrences": sum(1 for o in sc.occurrences.values() if not o.installed), "steps": len(ins.steps) if ins else 0},
+        "findings": {"coincident_occurrences": sc.coincident},
         "parts": parts, "assemblies": assemblies, "occurrences": occurrences, "steps": steps, "inventory": inventory,
         "input_hashes": project.input_hashes(),
         "checks_passed": ["schema fields", "asset paths inside root", "asset SHA-256", "unique ids", "hierarchy acyclic with one root",
@@ -85,6 +87,8 @@ def print_report(rep, out=sys.stdout):
         w(f"native up axis {rep['scene']['native_up_axis']}: basis_to_z_up applied once at the root\n")
     if rep["scene"]["transform_world_check"]:
         w(f"declared world matrices checked: {rep['scene']['transform_world_check']}\n")
+    for c in rep.get("findings", {}).get("coincident_occurrences", []):
+        w(f"FINDING: coincident occurrences of {c['part_id'][-40:]}: {c['occurrences']} (pose deviation {c['max_deviation']:.3g}); CAD ambiguity, count needs review\n")
     w("parts:\n")
     for p in rep["parts"]:
         dims = ", ".join(f"{k} {v}" for k, v in p["identifying_dimensions_mm"].items())
@@ -159,6 +163,7 @@ def main(argv=None):
     p.add_argument("project_dir"); p.add_argument("--renders", required=True, help="render output directory (render-receipt.json inside)")
     p.add_argument("--out", required=True, help="manual output directory"); p.add_argument("--meshes", help="meshes.json from the CAD stage, for the receipt")
     p.add_argument("--no-pdf", action="store_true"); p.add_argument("--embed-images", action="store_true", help="inline images into the HTML as data URIs")
+    p.add_argument("--appendix", action="store_true", help="print the technical appendix (full part ids, Vault ids, occurrence lists, every hash); always in manual.json")
     p.set_defaults(func=cmd_manual)
     p = sub.add_parser("check", help="verify the built manual: HTML/PDF/manual.json agreement, links, images")
     p.add_argument("out_dir"); p.add_argument("--json", help="write the check report here")

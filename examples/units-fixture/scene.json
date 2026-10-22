@@ -1,0 +1,259 @@
+{
+  "schema_version": "draft-1",
+  "id": "units-fixture",
+  "title": "Units fixture: inch, centimetre and millimetre assets in an inch, Y-up scene",
+  "units": "in",
+  "coordinate_system": {
+    "handedness": "right",
+    "up_axis": "+Y",
+    "origin": "base bottom centre (native)",
+    "note": "native frame is Y up; basis_to_z_up is applied once at the root",
+    "basis_to_z_up": [
+      [
+        1,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        -1,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        1
+      ]
+    ]
+  },
+  "source": {
+    "kind": "synthetic",
+    "generator": "examples/units-fixture/generate_fixture.py",
+    "qualification": "fixture only: the inch and centimetre files are the millimetre fixture files with their unit context rewritten"
+  },
+  "parts": [
+    {
+      "id": "pin-in",
+      "name": "Pin declared in inches",
+      "asset": {
+        "path": "assets/pin-in.step",
+        "format": "step",
+        "units": "in",
+        "sha256": "a58fb2491c29571d4345b76ca0f65630a2a038586f4d0619e0a98f2c7c2fa04f"
+      },
+      "identifying_dimensions_mm": {
+        "extent": [
+          254.0,
+          254.0,
+          762.0
+        ]
+      },
+      "volume_mm3": 38611109.90722933,
+      "description": "10 x 30 inch cylinder: the millimetre pin's coordinates read in inches"
+    },
+    {
+      "id": "base-cm",
+      "name": "Base declared in centimetres",
+      "asset": {
+        "path": "assets/base-cm.step",
+        "format": "step",
+        "units": "cm",
+        "sha256": "fa5e1c378482a07d01a33511dca4744acf94a0e4a5686187fb2c1b115f2a0086"
+      },
+      "identifying_dimensions_mm": {
+        "extent": [
+          1000.0,
+          600.0,
+          80.0
+        ]
+      },
+      "volume_mm3": 46614557.6397669,
+      "description": "100 x 60 x 8 cm plate with two 10.5 cm holes: the millimetre base's coordinates read in centimetres"
+    },
+    {
+      "id": "pin-mm",
+      "name": "Pin in millimetres",
+      "asset": {
+        "path": "assets/pin-mm.step",
+        "format": "step",
+        "units": "mm",
+        "sha256": "830d521aeae2e21164e8cdafa4a0ffec5ad6ed1254714207772f6a18d0995be4"
+      },
+      "identifying_dimensions_mm": {
+        "extent": [
+          10.0,
+          10.0,
+          30.0
+        ]
+      },
+      "volume_mm3": 2356.194490192345,
+      "description": "the unchanged 10 x 30 mm pin"
+    }
+  ],
+  "assemblies": [
+    {
+      "id": "root",
+      "parent_id": null,
+      "transform": [
+        [
+          1,
+          0,
+          0,
+          0.0
+        ],
+        [
+          0,
+          1,
+          0,
+          0.0
+        ],
+        [
+          0,
+          0,
+          1,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    },
+    {
+      "id": "stand",
+      "parent_id": "root",
+      "transform": [
+        [
+          1,
+          0,
+          0,
+          0.0
+        ],
+        [
+          0,
+          1,
+          0,
+          0.0
+        ],
+        [
+          0,
+          0,
+          1,
+          -10.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    }
+  ],
+  "occurrences": [
+    {
+      "id": "base-cm-1",
+      "part_id": "base-cm",
+      "parent_id": "root",
+      "transform": [
+        [
+          1,
+          0,
+          0,
+          0.0
+        ],
+        [
+          0,
+          0,
+          1,
+          0.0
+        ],
+        [
+          0,
+          -1,
+          0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    },
+    {
+      "id": "pin-in-1",
+      "part_id": "pin-in",
+      "parent_id": "stand",
+      "transform": [
+        [
+          1,
+          0,
+          0,
+          30.0
+        ],
+        [
+          0,
+          0,
+          1,
+          2.0
+        ],
+        [
+          0,
+          -1,
+          0,
+          10.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    },
+    {
+      "id": "pin-mm-1",
+      "part_id": "pin-mm",
+      "parent_id": "stand",
+      "transform": [
+        [
+          1,
+          0,
+          0,
+          -30.0
+        ],
+        [
+          0,
+          0,
+          1,
+          0.0
+        ],
+        [
+          0,
+          -1,
+          0,
+          10.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    }
+  ]
+}

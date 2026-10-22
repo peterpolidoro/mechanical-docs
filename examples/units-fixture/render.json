@@ -1,0 +1,12 @@
+{
+  "schema_version": "draft-1",
+  "note": "Illustration settings only.",
+  "looks": {
+    "pin-in": "blue-anodized",
+    "base-cm": "aluminium",
+    "pin-mm": "red-plastic"
+  },
+  "inspection_groups": [
+    "stand"
+  ]
+}

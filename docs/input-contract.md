@@ -121,11 +121,22 @@ outputs say so. `python3 -m mechanical_docs inventory-template PROJECT` writes a
 draft inventory whose `required` equals the installed occurrences per part;
 that is an installed quantity, not a purchase list or stock.
 
-Flexible subassemblies: one group definition with per-instance child placements
-is what the contract expects. Each flexible instance is already a distinct
-group id (`CAMERA FRAME:1`), its children carry the instance transforms, and
-`parent_flexible`/`position_overridden_vs_definition` record that they differ
-from the definition. No separate group ids per flexible instance are needed.
+Flexible subassemblies: every assembly *occurrence* already has its own group
+id (`CAMERA FRAME:1`, `FREE STANDING FRAME:1/CASTER ASSEMBLY:2`) and its own
+child poses in `scene.json`. What may be shared between instances is the
+definition (the document and the parts' geometry); what may not be shared is
+the instance poses, so the exporter writes the instance transforms of a
+flexible occurrence's children and records that they differ from the
+definition with `parent_flexible` and `position_overridden_vs_definition`.
+Nothing further is needed from the exporter: no second set of group ids, and
+no per-definition geometry variant.
+
+Occurrence ids are **snapshot-scoped paths**: they are stable within one
+export (`source.occurrence_id_scope` says so) and may change when the native
+assembly is refreshed. Documents, receipts and evidence therefore name the
+snapshot (scene id, Vault version) with every occurrence id, and nothing
+compares occurrence ids across snapshots. A refresh-stable key remains an
+open exporter request.
 
 Per-asset units: accepted and preferred over re-export. FreeCAD imports every
 STEP as millimetres whatever the file declares, so the CAD stage reads the
@@ -152,23 +163,47 @@ a part without an inventory row, a suppressed or mirrored occurrence, a declared
 world matrix that disagrees with the hierarchy, and an installed-occurrence count
 that includes reference-only geometry.
 
+Findings that are not errors: two occurrences of one part at the same world
+pose (within 1e-6 of the scene's extent) are a CAD ambiguity, not a rejected
+input. The loader keeps and counts both, records the pair
+(`Scene.coincident`, `inspect` prints a FINDING line), and the documents say
+on their status block and on the part's card that the count needs review
+before it becomes stock. The enclosure snapshot has one such pair (the tank at
+the root and the tank under the upper support frame, deviation 2.5e-12 mm),
+which the Linux CAD agent's independent FreeCAD survey also found.
+
 Unit handling: each asset declares its own unit, which the CAD stage verifies
 against the STEP file and normalises to millimetres; the scene's transforms,
 camera coordinates and approach offsets are in the scene's units. Each is
 converted to metres with its own factor exactly once (`geometry.py`), and the
 render stage checks the imported mesh bounds against the CAD stage's record so
 a double or missing conversion fails loudly. The `examples/two-bases-fixture`
-scene (centimetres, millimetre assets, a station rotated 90°) and the enclosure
-snapshot (inch, mm and cm assets, +Y-up native frame) exercise this.
+scene (centimetres, millimetre assets, a station rotated 90°), the
+`examples/units-fixture` scene (an inch, +Y-up scene with a real inch STEP, a
+centimetre STEP and a millimetre STEP, derived from the millimetre fixture by
+rewriting only the unit context; `tests/test_cad_stage.py` runs FreeCAD on it
+and also requires an asset declared in the wrong unit to be refused) and the
+enclosure snapshot (inch, mm and cm assets, +Y-up native frame) exercise this.
 
 ### Illustration settings (`render.json`, optional)
 
-Per project, beside the manifests. Only appearance: `looks` (part id → palette
-name), `palette` additions, `engine`, `samples`, image sizes, `aspect`, `fill`,
-outline and arrow styling, and the line-art budget (`lines.max_triangles`,
-above which a view is drawn without Freestyle and the receipt says so). Unknown
-fields and unknown look names are rejected. It cannot change geometry,
-identity, quantities or order.
+Per project, beside the manifests. Only appearance and which illustrative
+views exist: `looks` (part id → palette name), `palette` additions, `engine`,
+`samples`, image sizes, `aspect`, `fill`, outline and arrow styling, the
+line-art budget (`lines.max_triangles`, above which a view is drawn without
+Freestyle and the receipt says so), the long-part thumbnail rules
+(`thumbnail_long_aspect`, default 4: a part whose longest extent is at least
+four times the next is turned with its long axis along X, drawn in a wide
+image and given an end view `part-<id>-end.png` looking straight along that
+axis; `thumbnail_long_px`, `thumbnail_long_direction`, `thumbnail_end_view`),
+and `inspection_groups`: assembly ids rendered alone as subassembly inspection
+views (`group-<id>.png`, every occurrence under the group at its canonical
+pose, framed from `group_direction`). The render CLI's `--groups` adds to that
+list. Unknown fields, unknown look names and unknown assembly ids are
+rejected. It cannot change geometry, identity, quantities or order, and an
+inspection view is never an assembly step: nothing is exploded, hidden or
+reordered inside the group, and the receipt records the group's occurrence
+ids, parent and path.
 
 ### Stage outputs
 
@@ -176,9 +211,9 @@ identity, quantities or order.
 | --- | --- | --- |
 | `inspect.json` | `python3 -m mechanical_docs inspect` | validated parts, occurrences with world transforms, steps with cumulative state, inventory reconciliation, input hashes |
 | `meshes/<part>.glb`, `meshes/meshes.json` | `cad_mesh.py` (FreeCADCmd) | one GLB per part (metres, +Y up, conversion recorded in the asset extras), declared STEP unit versus manifest unit, STEP validity/bounds/volume, mesh winding and volume checks, tessellation attempts under the per-part triangle budget, hashes |
-| `renders/*.png`, `renders/hotspots/*.json`, `renders/render-receipt.json` | `render.py` (Blender) | thumbnails, overview, step and result images; projected occurrence boxes; versions, engine, denoiser, settings hash, per-view hashes, visible triangles and whether line art was drawn, mesh-bounds and pose-restoration checks |
-| `manual/manual.json`, `index.html`, `manual.typ`, `<id>.pdf`, `build-receipt.json` | `python3 -m mechanical_docs manual` | the single document model and both outputs generated from it |
-| `manual/check-report.json`, `manual/checks/` | `python3 -m mechanical_docs check` | HTML/PDF/manual.json agreement, link and image resolution, page rasters and greyscale copies |
+| `renders/*.png`, `renders/hotspots/*.json`, `renders/render-receipt.json` | `render.py` (Blender) | thumbnails (wide ones plus end views for long parts), overview, subassembly inspection views (`group-*.png` with occurrence ids, parent and path), step and result images; projected occurrence boxes; versions, engine, denoiser, settings hash, per-view hashes, visible triangles and whether line art was drawn, which views were copied from an earlier receipt (`--reuse`, same inputs/meshes/engine only, `reused_from` per view), mesh-bounds and pose-restoration checks |
+| `manual/manual.json`, `index.html`, `manual.typ`, `<id>.pdf`, `build-receipt.json` | `python3 -m mechanical_docs manual [--appendix]` | the single document model and both outputs generated from it: picture-led parts cards (CAD quantity labelled as such, blank counted box), one page per subassembly inspection view, overview, steps, a compact build record; `--appendix` adds the technical appendix (full part ids, Vault ids, occurrence lists, every hash), which manual.json always carries |
+| `manual/check-report.json`, `manual/checks/` | `python3 -m mechanical_docs check` | HTML/PDF/manual.json agreement (parts, CAD quantities, subassembly sections and their part counts, step order), link and image resolution, page rasters and greyscale copies |
 
 Each stage refuses inputs whose hashes differ from the receipt it consumes, and
 refuses receipts that report failed checks or partial renders.

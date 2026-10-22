@@ -1,14 +1,21 @@
 """Render stage, run inside Blender: part thumbnails, an overview and one or two images per step.
 
     blender -b --python mechanical_docs/render.py -- PROJECT_DIR MESHES_JSON OUT_DIR [--preview] [--views a,b] [--engine E] [--no-lines]
+                                                     [--groups ASSEMBLY_ID,...] [--reuse RENDER_DIR]
 
 Reads the validated project (manifest.py), the CAD stage's meshes.json and the
 project's optional render.json (illustration settings: looks, sizes). Imports
 each part's GLB once, instantiates every occurrence at its canonical world
 pose (the scene's +Z-up frame, scaled to metres exactly once), and renders:
 
-    part-<part>.png          the part alone, auto-framed, for the inventory
+    part-<part>.png          the part alone, auto-framed, for the inventory; a long
+                             part (extrusion, profile) is turned with its long axis
+                             along X and drawn in a wide image
+    part-<part>-end.png      a long part seen straight along its long axis: the
+                             profile or end detail that identifies it
     overview.png             the finished assembly, instruction camera
+    group-<assembly>.png     one subassembly alone, every occurrence at its canonical
+                             pose, auto-framed: an inspection/parts view, not a step
     step-NN-<step>.png       parts installed before the step subdued (flat grey
                              silhouettes, thin outline), the step's additions in
                              their looks with a thick outline, later parts hidden;
@@ -24,6 +31,12 @@ camera does not move between steps. Canonical poses are restored and verified
 after each view; an approach offset can never leak into the next image.
 hotspots/<view>.json carries each visible occurrence's projected pixel box for
 web callouts. render-receipt.json records versions, settings, hashes and checks.
+
+--reuse RENDER_DIR copies views from an earlier complete receipt made from the
+same inputs, meshes, engine and quality instead of rendering them again; only
+views named in --views or absent from that receipt are rendered. Each copied
+view keeps its own record plus `reused_from`, so the receipt stays honest about
+what was rendered when and under which settings.
 
 Studio lighting, look palette, Freestyle subject/context outlines, projection
 framing and the matrix_basis restore are adapted from mouse-joysticks-mech
@@ -163,7 +176,15 @@ class Renderer:
         bpy.context.view_layer.update()
         self.canonical_world = {oid: o.matrix_world.copy() for oid, o in self.obj_of.items()}
         self.all_objs = list(self.obj_of.values()) + list(self.thumb_of.values())
-        log(f"{len(self.obj_of)} occurrences instantiated from {len(self.mesh_of)} meshes")
+        # a part's thumbnail style follows its extents (the basis only permutes axes)
+        self.thumb_style = {}
+        for pid, rec in self.meshes["parts"].items():
+            mn, mx = geometry.mesh_bounds_m(rec["mesh"])
+            e = sorted((b - a for a, b in zip(mn, mx)), reverse=True)
+            aspect = e[0] / max(e[1], 1e-9)
+            self.thumb_style[pid] = ("long" if aspect >= self.s["thumbnail_long_aspect"] else "square", round(aspect, 2))
+        log(f"{len(self.obj_of)} occurrences instantiated from {len(self.mesh_of)} meshes; "
+            f"{sum(1 for st, _ in self.thumb_style.values() if st == 'long')} long part(s) get wide thumbnails and end views")
 
     # ----------------------------------------------------------- materials
 
@@ -520,22 +541,78 @@ class Renderer:
         rec.update(extra)
         return rec
 
-    def render_thumbnail(self, pid):
-        view_id = f"part-{slug(pid)}"
+    def thumbnail_pose(self, t):
+        """Pose the thumbnail object (never an occurrence) for its picture: the
+        scene's up orientation, and for a long part a turn that lays its long
+        axis along X. Returns (style, long axis letter in the part's own frame)."""
+        t.matrix_world = Matrix(self.scene.basis_to_z_up)
+        bpy.context.view_layer.update()
+        mn, mx = aabb_of([t.matrix_world @ Vector(c) for c in t.bound_box])
+        e = mx - mn
+        longest = max(range(3), key=lambda i: e[i])
+        # the long axis in the part's own frame: the basis column that maps onto `longest`
+        B = Matrix(self.scene.basis_to_z_up).to_3x3()
+        part_axis = max(range(3), key=lambda j: abs(B[longest][j]))
+        style = self.thumb_style[t["part_id"]][0]
+        if style == "long":
+            if longest == 1:
+                t.matrix_world = Matrix.Rotation(-math.pi / 2, 4, "Z") @ t.matrix_world   # Y -> X
+            elif longest == 2:
+                t.matrix_world = Matrix.Rotation(math.pi / 2, 4, "Y") @ t.matrix_world    # Z -> X
+            bpy.context.view_layer.update()
+        return style, "xyz"[part_axis]
+
+    def thumbnail_px(self):
+        return self.s["thumbnail_px"] if not self.preview else self.s["preview_long_side_px"] // 2
+
+    def show_only_thumb(self, pid):
         self.restore()
         for o in self.obj_of.values():
             o.hide_render = True
         t = self.thumb_of[pid]; t.hide_render = False
         self.coll_subject.objects.link(t)
-        self.set_resolution(self.s["thumbnail_px"] if not self.preview else self.s["preview_long_side_px"] // 2, [1, 1])
+        return t
+
+    def render_thumbnail(self, pid):
+        view_id = f"part-{slug(pid)}"
+        t = self.show_only_thumb(pid)
+        style, axis = self.thumbnail_pose(t)
+        if style == "long":
+            wide = self.s["thumbnail_long_aspect_px"]
+            self.set_resolution(self.s["thumbnail_long_px"] if not self.preview else self.s["preview_long_side_px"], wide)
+            d = Vector(self.s["thumbnail_long_direction"]).normalized()
+        else:
+            self.set_resolution(self.thumbnail_px(), [1, 1])
+            d = Vector(self.s["thumbnail_direction"]).normalized()
         corners = [t.matrix_world @ Vector(c) for c in t.bound_box]
         mn, mx = aabb_of(corners); ctr = (mn + mx) / 2
-        d = Vector(self.s["thumbnail_direction"]).normalized()
         self.aim(ctr + d * max((mx - mn).length, 1e-3) * 4, ctr, Vector((0, 0, 1)))
         framed = self.fit(corners, "orthographic", self.s["thumbnail_fill"])
         self.place_floor([t], "part-thumbnail")
         path, secs = self.render_to(view_id, self.samples())
-        rec = self.view_record(view_id, path, secs, kind="part-thumbnail", part_id=pid, framed=framed)
+        end_view = f"part-{slug(pid)}-end" if style == "long" and self.s["thumbnail_end_view"] else None
+        rec = self.view_record(view_id, path, secs, kind="part-thumbnail", part_id=pid, framed=framed, style=style,
+                               long_axis=axis if style == "long" else None, aspect=self.thumb_style[pid][1], end_view=end_view)
+        t.matrix_world = Matrix(self.scene.basis_to_z_up)
+        self.restore(); self.verify_restored(view_id)
+        return rec
+
+    def render_part_end(self, pid):
+        """A long part seen straight along its long axis (orthographic): the
+        cross-section or end detail. Same object, same canonical geometry."""
+        view_id = f"part-{slug(pid)}-end"
+        t = self.show_only_thumb(pid)
+        style, axis = self.thumbnail_pose(t)        # long axis now along X
+        self.set_resolution(self.thumbnail_px(), [1, 1])
+        corners = [t.matrix_world @ Vector(c) for c in t.bound_box]
+        mn, mx = aabb_of(corners); ctr = (mn + mx) / 2
+        self.aim(ctr + Vector((1.0, 0.0, 0.0)) * max((mx - mn).length, 1e-3) * 4, ctr, Vector((0, 0, 1)))
+        framed = self.fit(corners, "orthographic", self.s["thumbnail_fill"])
+        self.place_floor([t], "part-end")
+        path, secs = self.render_to(view_id, self.samples())
+        rec = self.view_record(view_id, path, secs, kind="part-end", part_id=pid, framed=framed, style=style, long_axis=axis,
+                               aspect=self.thumb_style[pid][1], looking_along=f"+{axis} of the part, towards -{axis}")
+        t.matrix_world = Matrix(self.scene.basis_to_z_up)
         self.restore(); self.verify_restored(view_id)
         return rec
 
@@ -550,6 +627,68 @@ class Renderer:
         hs = self.hotspots(view_id, list(self.obj_of))
         self.write_hotspots(hs)
         rec = self.view_record(view_id, path, secs, kind="overview", visible=list(self.obj_of), framed=framed)
+        self.restore(); self.verify_restored(view_id)
+        return rec
+
+    def facing_direction(self, default, extent):
+        """The configured view direction, except that a flat group (one extent
+        under a fifth of the next, like a panel with its handles) is viewed
+        mostly along its thin axis from the side the default looks from, so the
+        face shows instead of the edge. Looks only; nothing moves."""
+        d = Vector(default)
+        e = sorted((extent[0], extent[1], extent[2]))
+        if e[0] < 0.2 * e[1]:
+            i = min(range(3), key=lambda k: extent[k])
+            sign = 1.0 if d[i] >= 0 else -1.0
+            d[i] = sign * 2.5 * max(abs(d[k]) for k in range(3) if k != i)
+        return d.normalized()
+
+    def assembly_path(self, gid):
+        trail = []; cur = gid
+        while cur is not None and cur in self.scene.assemblies and len(trail) <= len(self.scene.assemblies):
+            trail.append(cur); cur = self.scene.assemblies[cur].parent_id
+        return list(reversed(trail))
+
+    def group_members(self, gid):
+        """Occurrence ids under the assembly (any depth), in scene order."""
+        return [oid for oid, occ in self.scene.occurrences.items() if gid in occ.path]
+
+    def render_group(self, gid):
+        """One subassembly alone, every occurrence at its canonical pose, framed
+        from `group_direction`: an inspection/parts view. Nothing is moved,
+        exploded or hidden inside the group; no step or sequence is implied."""
+        view_id = f"group-{slug(gid)}"
+        self.restore()
+        members = self.group_members(gid)
+        if not members:
+            raise SystemExit(f"--groups: assembly {gid!r} has no occurrences")
+        for oid, o in self.obj_of.items():
+            o.hide_render = oid not in members
+        for oid in members:
+            self.coll_subject.objects.link(self.obj_of[oid])
+        self.set_resolution(self.long_side(), self.s["aspect"])
+        pts = []
+        for oid in members:
+            pts += self.occurrence_corners(oid)
+        mn, mx = aabb_of(pts); ctr = (mn + mx) / 2
+        d = self.facing_direction(self.s["group_direction"], mx - mn)
+        self.aim(ctr + d * max((mx - mn).length, 1e-3) * 4, ctr, Vector((0, 0, 1)))
+        framed = self.fit(pts, "orthographic", self.s["group_fill"])
+        self.place_floor([self.obj_of[oid] for oid in members], "group")
+        path, secs = self.render_to(view_id, self.samples())
+        hs = self.hotspots(view_id, members)
+        self.write_hotspots(hs)
+        asm = self.scene.assemblies[gid]
+        parts = {}
+        for oid in members:
+            pid = self.scene.occurrences[oid].part_id
+            parts[pid] = parts.get(pid, 0) + 1
+        rec = self.view_record(view_id, path, secs, kind="group", group_id=gid, parent_id=asm.parent_id, assembly_path=self.assembly_path(gid),
+                               depth=asm.depth, flexible=asm.flexible, visible=members, direction=[round(v, 4) for v in d],
+                               occurrences=[{"id": oid, "part_id": self.scene.occurrences[oid].part_id, "parent_id": self.scene.occurrences[oid].parent_id} for oid in members],
+                               parts=parts, poses="canonical", exploded=False, framed=framed,
+                               extent_m=[round(v, 4) for v in (mx - mn)],
+                               note="inspection view: occurrences at their CAD poses; not an assembly step; no sequence, fasteners or tool access implied")
         self.restore(); self.verify_restored(view_id)
         return rec
 
@@ -601,33 +740,73 @@ class Renderer:
 
     # ---------------------------------------------------------------- run
 
-    def run(self, only=None):
-        self.out.mkdir(parents=True, exist_ok=True)
-        views = []
+    def plan(self, groups=()):
         plan = []
         for pid in self.scene.parts:
             plan.append((f"part-{slug(pid)}", lambda pid=pid: self.render_thumbnail(pid)))
+            if self.thumb_style[pid][0] == "long" and self.s["thumbnail_end_view"]:
+                plan.append((f"part-{slug(pid)}-end", lambda pid=pid: self.render_part_end(pid)))
         plan.append(("overview", self.render_overview))
+        for gid in groups:
+            plan.append((f"group-{slug(gid)}", lambda gid=gid: self.render_group(gid)))
         for st in self.states:
             plan.append((f"step-{st.index:02d}-{slug(st.step.id)}", lambda st=st: self.render_step(st)))
             if st.step.approach is not None:
                 plan.append((f"step-{st.index:02d}-{slug(st.step.id)}-result", lambda st=st: self.render_step(st, result=True)))
-        for view_id, fn in plan:
-            if only and view_id not in only:
+        return plan
+
+    def reuse_view(self, old, reuse):
+        """Copy an earlier run's view (image, hotspots, record) after checking the
+        image still hashes as that receipt recorded."""
+        src = Path(reuse["dir"]) / old["file"]
+        if not src.is_file() or receipts.sha256_file(src) != old["sha256"]:
+            raise SystemExit(f"--reuse: {src} is missing or differs from its receipt; render it again")
+        import shutil
+        shutil.copyfile(src, self.out / old["file"])
+        hs = Path(reuse["dir"]) / "hotspots" / f"{old['id']}.json"
+        if hs.is_file():
+            (self.out / "hotspots").mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(hs, self.out / "hotspots" / hs.name)
+        rec = dict(old)
+        if rec.get("reused_from"):
+            # already a copy: keep the original render's provenance, record this hop
+            rec["reused_via"] = list(rec.get("reused_via", [])) + [reuse["receipt_path"]]
+        else:
+            rec.update({"reused_from": reuse["receipt_path"], "reused_settings_sha256": reuse["settings_sha256"],
+                        "reused_generated_at_utc": reuse["generated_at_utc"], "reused_blender": reuse.get("blender")})
+        return rec
+
+    def run(self, only=None, groups=(), reuse=None):
+        """Render the plan. `only` restricts rendering to those view ids; with
+        `reuse`, every other planned view present in the earlier receipt is
+        copied and views absent from it are rendered. Returns (views, missing)."""
+        self.out.mkdir(parents=True, exist_ok=True)
+        views = []
+        old = {v["id"]: v for v in reuse["views"]} if reuse else {}
+        missing = []
+        for view_id, fn in self.plan(groups):
+            wanted = not only or view_id in only
+            if reuse is not None and view_id in old and not (only and view_id in only):
+                rec = self.reuse_view(old[view_id], reuse)
+                views.append(rec)
+                log(f"{view_id}: reused from {reuse['receipt_path']} ({rec['width']}x{rec['height']}, {rec['seconds']}s then)")
+                continue
+            if not wanted and reuse is None:
+                missing.append(view_id)
                 continue
             rec = fn()
             views.append(rec)
             log(f"{view_id}: {rec['width']}x{rec['height']} in {rec['seconds']}s" + ("" if rec.get("framed", True) else "  WARNING: content clipped"))
             if not rec.get("framed", True):
                 self.checks["problems"].append(f"{view_id}: framed content does not fit the image")
-        return views
+        return views, missing
 
 
 def main(argv):
     if len(argv) < 3:
         raise SystemExit(__doc__)
     project_dir, meshes_path, out_dir = Path(argv[0]), Path(argv[1]), Path(argv[2])
-    preview = False; only = None; engine = None; lines = True; i = 3
+    preview = False; only = None; engine = None; lines = True; cli_groups = []; reuse_dir = None; i = 3
     while i < len(argv):
         if argv[i] == "--preview":
             preview = True; i += 1
@@ -635,6 +814,10 @@ def main(argv):
             lines = False; i += 1
         elif argv[i] == "--views":
             only = argv[i + 1].split(","); i += 2
+        elif argv[i] == "--groups":
+            cli_groups += [g for g in argv[i + 1].split(",") if g]; i += 2
+        elif argv[i] == "--reuse":
+            reuse_dir = Path(argv[i + 1]); i += 2
         elif argv[i] == "--engine":
             engine = argv[i + 1]; i += 2
         else:
@@ -654,9 +837,42 @@ def main(argv):
     if not meshes.get("all_checks_passed"):
         raise SystemExit(f"{meshes_path}: the CAD stage reported problems; not rendering unchecked geometry")
     settings, settings_path = load_settings(project.dir)
+    groups = []
+    for g in list(settings["inspection_groups"]) + cli_groups:
+        if g not in project.scene.assemblies:
+            raise SystemExit(f"--groups/inspection_groups: {g!r} is not an assembly id in the scene")
+        if g == project.scene.root_id:
+            raise SystemExit(f"--groups/inspection_groups: {g!r} is the root; the overview already shows it")
+        if g not in groups:
+            groups.append(g)
+    reuse = None
+    if reuse_dir is not None:
+        rp = reuse_dir / "render-receipt.json"
+        if not rp.is_file():
+            raise SystemExit(f"--reuse: no render receipt at {rp}")
+        old = receipts.read_json(rp)
+        want_engine = engine or settings["engine"]
+        reasons = []
+        if old.get("kind") != "mechanical-docs-render-receipt":
+            reasons.append("not a render receipt")
+        if old.get("input_hashes") != project.input_hashes():
+            reasons.append("different input hashes")
+        if old.get("mesh_hashes") != {pid: rec["mesh"]["sha256"] for pid, rec in meshes["parts"].items()}:
+            reasons.append("different meshes")
+        if old.get("engine") != want_engine:
+            reasons.append(f"engine {old.get('engine')} != {want_engine}")
+        if bool(old.get("preview")) != preview:
+            reasons.append("preview quality differs")
+        if not old.get("all_checks_passed"):
+            reasons.append("its checks did not all pass")
+        if reasons:
+            raise SystemExit(f"--reuse: cannot reuse {rp}: " + "; ".join(reasons))
+        reuse = {"dir": str(reuse_dir), "receipt_path": str(rp), "views": old["views"], "settings_sha256": old.get("settings_sha256"),
+                 "generated_at_utc": old.get("generated_at_utc"), "blender": old.get("blender")}
     t0 = time.time()
     r = Renderer(project, meshes, settings, out_dir, preview, engine, lines)
-    views = r.run(only)
+    views, missing = r.run(only, groups, reuse)
+    reused = [v["id"] for v in views if v.get("reused_from")]
     receipt = {
         "kind": "mechanical-docs-render-receipt", "generated_at_utc": receipts.utc_now(),
         "blender": bpy.app.version_string, "python": sys.version.split()[0], "engine": r.engine, "denoiser": r.denoiser,
@@ -668,14 +884,17 @@ def main(argv):
         "native_up_axis": project.scene.native_up_axis, "occurrences": len(project.scene.occurrences), "parts": len(project.scene.parts),
         "input_hashes": project.input_hashes(), "meshes_json_sha256": receipts.sha256_file(meshes_path),
         "mesh_hashes": {pid: rec["mesh"]["sha256"] for pid, rec in meshes["parts"].items()},
-        "partial": only is not None, "inventory_only": project.instructions is None, "views": views,
+        "partial": bool(missing), "missing_views": missing, "inventory_only": project.instructions is None,
+        "inspection_groups": groups, "reused_from": reuse["receipt_path"] if reuse else None, "reused_views": reused,
+        "rendered_views": [v["id"] for v in views if not v.get("reused_from")], "views": views,
         "checks": r.checks, "warnings": r.warnings,
         "all_checks_passed": not r.checks["problems"] and all(c["passed"] for c in r.checks["mesh_bounds_match"]) and all(c["passed"] for c in r.checks["restoration"]),
         "not_checked": ["image legibility (inspect the PNGs)", "insertion path or tool access", "physical assembly"],
         "seconds": round(time.time() - t0, 1),
     }
     receipts.write_json(out_dir / "render-receipt.json", receipt)
-    log(f"wrote {out_dir / 'render-receipt.json'}: {len(views)} views in {receipt['seconds']}s; checks passed: {receipt['all_checks_passed']}")
+    log(f"wrote {out_dir / 'render-receipt.json'}: {len(views)} views ({len(reused)} reused) in {receipt['seconds']}s; "
+        f"checks passed: {receipt['all_checks_passed']}" + (f"; PARTIAL, missing {missing}" if missing else ""))
     for w in r.warnings:
         log("WARNING:", w)
     return 0 if receipt["all_checks_passed"] else 1

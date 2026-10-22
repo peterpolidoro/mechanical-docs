@@ -1,0 +1,25 @@
+{
+  "schema_version": "draft-1",
+  "scene": "scene.json",
+  "status": "synthetic required quantities; physical stock not counted",
+  "items": [
+    {
+      "part_id": "pin-in",
+      "required": 1,
+      "unit": "each",
+      "counted": null
+    },
+    {
+      "part_id": "base-cm",
+      "required": 1,
+      "unit": "each",
+      "counted": null
+    },
+    {
+      "part_id": "pin-mm",
+      "required": 1,
+      "unit": "each",
+      "counted": null
+    }
+  ]
+}

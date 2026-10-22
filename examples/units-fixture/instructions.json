@@ -1,0 +1,89 @@
+{
+  "schema_version": "draft-1",
+  "scene": "scene.json",
+  "id": "units-fixture-sequence",
+  "title": "Units fixture: synthetic sequence",
+  "review_state": "draft",
+  "views": [
+    {
+      "id": "iso",
+      "projection": "orthographic",
+      "eye": [
+        90,
+        -110,
+        70
+      ],
+      "target": [
+        0,
+        0,
+        12
+      ],
+      "up": [
+        0,
+        0,
+        1
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "id": "place-base",
+      "requires": [],
+      "add": [
+        "base-cm-1"
+      ],
+      "view": "iso",
+      "caption": "Place the centimetre base."
+    },
+    {
+      "id": "stand-inch-pin",
+      "requires": [
+        "place-base"
+      ],
+      "add": [
+        "pin-in-1"
+      ],
+      "view": "iso",
+      "caption": "Stand the inch pin beside it (illustration only).",
+      "approach": {
+        "occurrence_id": "pin-in-1",
+        "start_offset": [
+          0,
+          0,
+          8
+        ],
+        "end_offset": [
+          0,
+          0,
+          0
+        ],
+        "validation": "unverified-render-hint"
+      }
+    },
+    {
+      "id": "stand-mm-pin",
+      "requires": [
+        "place-base"
+      ],
+      "add": [
+        "pin-mm-1"
+      ],
+      "view": "iso",
+      "caption": "Stand the millimetre pin on the other side (illustration only).",
+      "approach": {
+        "occurrence_id": "pin-mm-1",
+        "start_offset": [
+          0,
+          0,
+          3
+        ],
+        "end_offset": [
+          0,
+          0,
+          0
+        ],
+        "validation": "unverified-render-hint"
+      }
+    }
+  ]
+}

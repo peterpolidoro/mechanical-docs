@@ -142,6 +142,10 @@ class Scene:
     native_up_axis: str = "+Z"
     basis_to_z_up: list = field(default_factory=lambda: [list(r) for r in T.IDENTITY])
     transform_world_check: dict | None = None     # when the exporter declared world matrices
+    coincident: list = field(default_factory=list)   # [{"part_id", "occurrences": [a, b], "max_deviation"}]: same part, same world pose
+
+    def coincident_of(self, part_id):
+        return [c for c in self.coincident if c["part_id"] == part_id]
 
     def occurrences_of(self, part_id):
         return [o for o in self.occurrences.values() if o.part_id == part_id]
@@ -518,13 +522,27 @@ def load_scene(path, root=None, chk=None):
     chk(bool(occurrences), "scene.occurrences: at least one occurrence is required")
     unused = sorted(set(parts) - {o.part_id for o in occurrences.values()})
     chk(not unused, f"scene.parts: part(s) with no occurrence: {unused}")
+    # Two occurrences of one part at the same world pose are a CAD ambiguity, not a
+    # validation error: the source instances are kept and counted, and the finding is
+    # recorded so documents can say the count needs review before it becomes stock.
+    coincident = []
+    by_part = {}
+    for o in occurrences.values():
+        by_part.setdefault(o.part_id, []).append(o)
+    tol = 1e-6 * max(1.0, max((abs(v) for o in occurrences.values() for v in T.translation(o.world)), default=1.0))
+    for pid, occs in by_part.items():
+        for i in range(len(occs)):
+            for j in range(i + 1, len(occs)):
+                dev = max(abs(a - b) for ra, rb in zip(occs[i].world, occs[j].world) for a, b in zip(ra, rb))
+                if dev < tol:
+                    coincident.append({"part_id": pid, "occurrences": [occs[i].id, occs[j].id], "max_deviation": dev})
 
     if own:
         chk.raise_if_any()
     scene = Scene(sid or "", str(data.get("title", "")), units or "", dict(cs or {}), dict(src or {}), parts, assemblies, occurrences,
                   roots[0].id if roots else "", path, sha256_file(path) if path.is_file() else "",
                   up_axis or "+Z", basis,
-                  {"checked": tw_checked, "max_deviation": tw_worst} if tw_checked else None)
+                  {"checked": tw_checked, "max_deviation": tw_worst} if tw_checked else None, coincident)
     return scene
 
 

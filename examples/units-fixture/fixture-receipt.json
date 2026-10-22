@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "kind": "units-fixture-receipt",
+  "method": "unit context rewritten (CONVERSION_BASED_UNIT inch of 25.4 mm, or SI_UNIT centi metre); coordinates unchanged",
+  "assets": {
+    "pin-in": {
+      "path": "assets/pin-in.step",
+      "sha256": "a58fb2491c29571d4345b76ca0f65630a2a038586f4d0619e0a98f2c7c2fa04f",
+      "bytes": 3855,
+      "declared_unit": "in",
+      "derived_from": "three-part-fixture/assets/pin.step",
+      "source_sha256": "830d521aeae2e21164e8cdafa4a0ffec5ad6ed1254714207772f6a18d0995be4",
+      "coordinates_unchanged": true,
+      "expected_extent_mm": [
+        254.0,
+        254.0,
+        762.0
+      ],
+      "expected_volume_mm3": 38611109.90722933
+    },
+    "base-cm": {
+      "path": "assets/base-cm.step",
+      "sha256": "fa5e1c378482a07d01a33511dca4744acf94a0e4a5686187fb2c1b115f2a0086",
+      "bytes": 10060,
+      "declared_unit": "cm",
+      "derived_from": "three-part-fixture/assets/base.step",
+      "source_sha256": "582703b3995a3d3a455428ae252dece39009b24106b467254c4ec976b7187aaa",
+      "coordinates_unchanged": true,
+      "expected_extent_mm": [
+        1000.0,
+        600.0,
+        80.0
+      ],
+      "expected_volume_mm3": 46614557.6397669
+    },
+    "pin-mm": {
+      "path": "assets/pin-mm.step",
+      "sha256": "830d521aeae2e21164e8cdafa4a0ffec5ad6ed1254714207772f6a18d0995be4",
+      "bytes": 3522,
+      "declared_unit": "mm",
+      "derived_from": "three-part-fixture/assets/pin.step",
+      "source_sha256": "830d521aeae2e21164e8cdafa4a0ffec5ad6ed1254714207772f6a18d0995be4",
+      "coordinates_unchanged": true,
+      "expected_extent_mm": [
+        10.0,
+        10.0,
+        30.0
+      ],
+      "expected_volume_mm3": 2356.194490192345
+    }
+  },
+  "scene_units": "in",
+  "native_up_axis": "+Y",
+  "expected_world_translation_in": {
+    "base-cm-1": [
+      0,
+      0,
+      0
+    ],
+    "pin-in-1": [
+      30,
+      0,
+      2
+    ],
+    "pin-mm-1": [
+      -30,
+      0,
+      0
+    ]
+  },
+  "files": {
+    "generate_fixture.py": "99a4ca8ff51ae8193f96eaf9b4f20acde7b7a35b546a039b5fe7ff2fdd9e7bde",
+    "scene.json": "63ee7a512f006064427ac7a1fb7decd189dbcffe7a95bbed742e4431a113c0f4",
+    "instructions.json": "5f4a85e10d656e2140d8727685a5eba9ad6968d609496e943458b3f92b393276",
+    "inventory.json": "775cd2f9c3a1166acde05f3cefb074d401f912a07bd42aa02e8dae3995758ab9",
+    "render.json": "3cad4e29f2215610d8545d56b4152a521446cdfc65c488ca57f846e234f414a5"
+  },
+  "not_run_here": [
+    "FreeCAD import (tests/test_cad_stage.py runs the CAD stage when FreeCADCmd is present)",
+    "rendering",
+    "physical anything"
+  ]
+}

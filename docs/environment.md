@@ -83,6 +83,21 @@ stage 2 min 22 s, thumbnails 9.5 to 23 s each, overview 51 s without lines and
 32 min with them. Grease Pencil Line Art is the candidate replacement if that
 is still too slow for step views; it has not been tried in background mode here.
 
+Two mechanisms keep a production rebuild short. `render.py --reuse DIR` copies
+every planned view that an earlier complete receipt holds for the same input
+hashes, mesh hashes, engine and quality (image hash re-verified, `reused_from`
+and `reused_generated_at_utc` on the view record naming the receipt that
+rendered it; a view copied again in a later pass keeps that original
+provenance and lists the intermediate receipts in `reused_via`) and renders
+only the views named in `--views` or absent from that receipt; the enclosure's project-side `render.json` caps line art at
+400 000 visible triangles, so no full-assembly view runs Freestyle. Measured on
+2026-10-22 on the enclosure (Cycles, denoiser, 64 adaptive samples): seven wide
+1200 × 600 thumbnails of long extrusions 21 to 22 s each with the floor, their
+600 px end views 3.4 to 3.9 s each, three subassembly inspection views
+(1600 × 1200, floor, Freestyle on 55 000 to 91 000 visible triangles) 62 to
+82 s each; 17 views rendered and 31 reused in 6 min 25 s for the whole receipt,
+against 39 min for the full first render.
+
 ## Typst and Poppler
 
 Typst compiles the generated `manual.typ` with its bundled fonts (no network).

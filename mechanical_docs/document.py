@@ -1,6 +1,6 @@
 """Build the manual from the validated project and the render receipt.
 
-    python3 -m mechanical_docs manual PROJECT_DIR --renders DIR --out DIR [--meshes FILE] [--no-pdf] [--embed-images]
+    python3 -m mechanical_docs manual PROJECT_DIR --renders DIR --out DIR [--meshes FILE] [--no-pdf] [--embed-images] [--appendix]
 
 Writes OUT/manual.json (the one document model both outputs are generated
 from), OUT/images/ (the renders this manual uses, copied and hashed),
@@ -9,10 +9,18 @@ plus OUT/build-receipt.json. Quantities and step order come from the validated
 manifests; images come from the render receipt, which must have been made
 from the same inputs. Nothing is invented: unknown stock stays unknown and the
 review state is printed on both outputs.
+
+The printed inventory is picture-led and compact: one card per part with a
+large picture (a wide picture and an end view for long parts), a short label,
+the overall size, the CAD instance count labelled as such and a blank box for
+the counted quantity. Subassembly inspection views from the render receipt
+(kind `group`) get one page each: the parts at their CAD poses, never a step.
+Full identities (Vault ids, occurrence paths, every hash) are always in
+manual.json and build-receipt.json; `--appendix` prints them as a technical
+appendix as well, so the default printed document stays compact.
 """
 from __future__ import annotations
 
-import base64
 import json
 import shutil
 import subprocess
@@ -31,16 +39,44 @@ class DocumentError(ValueError):
     pass
 
 
-def dimensions_text(dims):
-    """'100 × 60 × 8 mm, hole Ø10.5 mm' from identifying_dimensions_mm."""
+CAD_QTY_NOTE = ("CAD qty is the number of instances of the part in the CAD model (reference-only geometry excluded). "
+                "It is not a purchase quantity: purchased kits, pack sizes, spares and stock are not reconciled.")
+
+
+def fmt(v):
+    return f"{v:g}"
+
+
+def fmt_mm(v):
+    """Millimetres for a label: whole numbers from 100 mm, one decimal below."""
+    return f"{v:.0f}" if v >= 100 else f"{v:.1f}".rstrip("0").rstrip(".")
+
+
+def fmt_in(v_mm):
+    return f"{v_mm / 25.4:.3f}".rstrip("0").rstrip(".")
+
+
+def display_name(part):
+    """The exporter's name with underscores as spaces; nothing dropped or added."""
+    return " ".join(part.name.replace("_", " ").split())
+
+
+def dimensions_text(dims, asset_units="mm"):
+    """'overall 80 × 32 × 28 mm' from an exporter extent (longest first; the inch
+    equivalent for an inch asset), or '100 × 60 × 8 mm, hole Ø10.5 mm' from the
+    fixtures' named dimensions."""
     if not dims:
         return ""
-    box = [dims[k] for k in ("width", "depth", "height") if k in dims]
     parts = []
+    if "extent" in dims:
+        ext = sorted(dims["extent"], reverse=True)
+        text = "overall " + " × ".join(fmt_mm(v) for v in ext) + " mm"
+        if asset_units == "in":
+            text += " (" + " × ".join(fmt_in(v) for v in ext) + " in)"
+        parts.append(text)
+    box = [dims[k] for k in ("width", "depth", "height") if k in dims]
     if len(box) == 3:
         parts.append(" × ".join(fmt(v) for v in box) + " mm")
-    if "extent" in dims:
-        parts.append("extent " + " × ".join(fmt(round(v, 1)) for v in dims["extent"]) + " mm")
     if "diameter" in dims and "length" in dims:
         parts.append(f"Ø{fmt(dims['diameter'])} × {fmt(dims['length'])} mm")
     for k, v in dims.items():
@@ -56,21 +92,16 @@ def dimensions_text(dims):
     return ", ".join(parts)
 
 
-def fmt(v):
-    return f"{v:g}"
-
-
 def part_details(part):
-    """Short provenance/metadata line for a part when the exporter supplied it."""
+    """Short metadata line for the card when the exporter supplied it: part
+    number, material, body count, a non-default BOM structure. Vendor,
+    manufacturer, model state and Vault identity go to the appendix."""
     bits = []
     pr = part.properties or {}
     if pr.get("part_number"):
         bits.append(f"P/N {pr['part_number']}")
-    for k in ("material", "vendor", "manufacturer"):
-        if pr.get(k):
-            bits.append(str(pr[k]))
-    if part.model_state:
-        bits.append(part.model_state)
+    if pr.get("material"):
+        bits.append(str(pr["material"]))
     if part.bodies and part.bodies.get("solid_bodies", 1) != 1:
         bits.append(f"{part.bodies['solid_bodies']} bodies")
     if part.bom_structure_default and part.bom_structure_default != "Normal":
@@ -78,14 +109,12 @@ def part_details(part):
     return " · ".join(bits)
 
 
-def build_model(project, render_receipt, meshes_receipt=None):
+def build_model(project, render_receipt, meshes_receipt=None, appendix=False):
     sc, ins, inv = project.scene, project.instructions, project.inventory
     states = derive_states(ins, sc) if ins is not None else []
     views = {v["id"]: v for v in render_receipt["views"]}
     if render_receipt.get("partial"):
-        raise DocumentError("render receipt is partial (--views); render every view before building the manual")
-    if render_receipt.get("preview"):
-        pass  # allowed, but recorded
+        raise DocumentError("render receipt is partial (--views without --reuse); render every view before building the manual")
     stale = {k: v for k, v in project.input_hashes().items() if render_receipt["input_hashes"].get(k) != v}
     if stale:
         raise DocumentError(f"render receipt was made from different inputs: {sorted(stale)}")
@@ -102,15 +131,52 @@ def build_model(project, render_receipt, meshes_receipt=None):
     for n, item in enumerate(inv.items, 1):
         part = sc.parts[item.part_id]
         label_of[part.id] = n
+        tv = views.get(f"part-{slug(part.id)}") or {}
+        end_id = tv.get("end_view")
+        parents = {}
+        for o in sc.installed_occurrences_of(part.id):
+            parents[o.parent_id] = parents.get(o.parent_id, 0) + 1
         inventory.append({
-            "label": n, "part_id": part.id, "name": part.name, "description": part.description,
-            "dimensions": dimensions_text(part.identifying_dimensions_mm), "identifying_dimensions_mm": part.identifying_dimensions_mm,
+            "label": n, "part_id": part.id, "name": part.name, "label_text": display_name(part), "description": part.description,
+            "dimensions": dimensions_text(part.identifying_dimensions_mm, part.asset.units), "identifying_dimensions_mm": part.identifying_dimensions_mm,
+            "asset_units": part.asset.units, "asset_path": part.asset.path, "asset_sha256": part.asset.sha256,
             "details": part_details(part), "properties": part.properties, "model_state": part.model_state,
             "bom_structure_default": part.bom_structure_default, "bodies": part.bodies, "source": part.source,
             "required": item.required, "unit": item.unit, "counted": item.counted,
             "occurrences": [o.id for o in sc.installed_occurrences_of(part.id)],
             "reference_occurrences": [o.id for o in sc.occurrences_of(part.id) if not o.installed],
-            "thumbnail": view_file(f"part-{slug(part.id)}"),
+            "parents": parents,
+            "coincident": sc.coincident_of(part.id),
+            "review_note": (f"{len(sc.coincident_of(part.id))} coincident instance pair(s) in CAD: review before counting as stock"
+                            if sc.coincident_of(part.id) else ""),
+            "thumbnail": view_file(f"part-{slug(part.id)}"), "thumbnail_style": tv.get("style", "square"),
+            "end_view": view_file(end_id) if end_id else None,
+        })
+    groups = []
+    for v in render_receipt["views"]:
+        if v.get("kind") != "group":
+            continue
+        gid = v["group_id"]
+        if gid not in sc.assemblies:
+            raise DocumentError(f"render receipt view {v['id']} names unknown assembly {gid!r}")
+        counts = {}
+        for oid in v["visible"]:
+            if oid not in sc.occurrences or gid not in sc.occurrences[oid].path:
+                raise DocumentError(f"render receipt view {v['id']}: occurrence {oid!r} is not under {gid!r}")
+            pid = sc.occurrences[oid].part_id
+            counts[pid] = counts.get(pid, 0) + 1
+        expected = [o.id for o in sc.occurrences.values() if gid in o.path]
+        if sorted(expected) != sorted(v["visible"]):
+            raise DocumentError(f"render receipt view {v['id']} does not show every occurrence under {gid!r}")
+        asm = sc.assemblies[gid]
+        groups.append({
+            "index": len(groups) + 1, "id": gid, "short_name": gid.split("/")[-1], "parent_id": asm.parent_id, "path": v.get("assembly_path", []),
+            "depth": asm.depth, "flexible": asm.flexible, "image": view_file(v["id"]), "view_id": v["id"],
+            "occurrences": [{"id": oid, "part_id": sc.occurrences[oid].part_id, "label": label_of[sc.occurrences[oid].part_id], "parent_id": sc.occurrences[oid].parent_id} for oid in v["visible"]],
+            "parts": [{"part_id": pid, "label": label_of[pid], "name": sc.parts[pid].name, "label_text": display_name(sc.parts[pid]), "qty": q,
+                       "thumbnail": view_file(f"part-{slug(pid)}")} for pid, q in sorted(counts.items(), key=lambda kv: label_of[kv[0]])],
+            "poses": v.get("poses", "canonical"), "exploded": bool(v.get("exploded", False)),
+            "note": v.get("note", "inspection view: occurrences at their CAD poses; not an assembly step"),
         })
     steps = []
     for st in states:
@@ -128,27 +194,37 @@ def build_model(project, render_receipt, meshes_receipt=None):
                                                  "direction_text": approach_text(ap.start_offset)},
             "view": st.step.view,
         })
+    source_summary = {k: v for k, v in sc.source.items() if k in ("kind", "generator", "qualification", "revision", "version", "root_version_id",
+                                                                   "exported_at", "exporter", "occurrence_id_scope")}
     model = {
         "kind": "mechanical-docs-manual", "generated_at_utc": receipts.utc_now(),
         "id": ins.id if ins is not None else f"{slug(sc.id)}-inventory",
         "title": ins.title if ins is not None else f"{sc.title}: parts inventory",
-        "scene": {"id": sc.id, "title": sc.title, "units": sc.units, "native_up_axis": sc.native_up_axis, "source": sc.source,
+        "scene": {"id": sc.id, "title": sc.title, "units": sc.units, "native_up_axis": sc.native_up_axis, "source": sc.source, "source_summary": source_summary,
                   "parts": len(sc.parts), "occurrences": len(sc.occurrences), "assemblies": len(sc.assemblies)},
         "review_state": ins.review_state if ins is not None else "draft",
         "inventory_only": ins is None,
-        "status_lines": status_lines(project, render_receipt),
+        "status_lines": status_lines(project, render_receipt, bool(groups)),
+        "findings": {"coincident_occurrences": sc.coincident},
         "inventory_status": inv.status,
+        "cad_qty_note": CAD_QTY_NOTE,
         "inventory": inventory,
         "overview_image": view_file("overview"),
+        "groups": groups,
         "steps": steps,
-        "hotspots": {v["id"]: f"hotspots/{v['id']}.json" for v in render_receipt["views"] if v.get("kind") in ("overview", "step", "step-result")},
+        "appendix": bool(appendix),
+        "hotspots": {v["id"]: f"hotspots/{v['id']}.json" for v in render_receipt["views"] if v.get("kind") in ("overview", "group", "step", "step-result")},
         "receipt": {
             "input_hashes": project.input_hashes(),
             "meshes": None if meshes_receipt is None else {"freecad_version": meshes_receipt.get("freecad_version"), "tessellation": meshes_receipt.get("tessellation"),
                                                            "mesh_hashes": {k: v["mesh"]["sha256"] for k, v in meshes_receipt["parts"].items()},
-                                                           "all_checks_passed": meshes_receipt.get("all_checks_passed")},
-            "render": {k: render_receipt.get(k) for k in ("blender", "engine", "denoiser", "preview", "samples", "long_side_px", "settings_sha256", "all_checks_passed", "warnings")},
+                                                           "all_checks_passed": meshes_receipt.get("all_checks_passed"),
+                                                           "sha256": render_receipt.get("meshes_json_sha256")},
+            "render": {k: render_receipt.get(k) for k in ("generated_at_utc", "blender", "engine", "denoiser", "preview", "samples", "long_side_px", "settings_sha256",
+                                                          "lines", "lines_max_triangles", "all_checks_passed", "warnings", "reused_from", "reused_views", "inspection_groups")},
             "render_views": {v["id"]: v["sha256"] for v in render_receipt["views"]},
+            "render_view_details": {v["id"]: {k: v.get(k) for k in ("kind", "width", "height", "seconds", "lines", "visible_triangles", "reused_from", "reused_generated_at_utc", "style")}
+                                    for v in render_receipt["views"]},
             "generator": {**receipts.python_info(), "package": "mechanical-docs"},
         },
     }
@@ -163,30 +239,43 @@ def approach_text(offset):
     return axes[best][0] if mags[best] > 0 else "in place"
 
 
-def status_lines(project, render_receipt):
+def status_lines(project, render_receipt, has_groups=False):
     ins, sc = project.instructions, project.scene
     if ins is None:
         lines = ["Parts inventory and overview only: no assembly sequence has been authored or reviewed for this scene."]
     else:
         lines = [f"Review state: {ins.review_state}. This sequence has not been physically validated."]
     if sc.source.get("kind", "").startswith("autodesk-inventor"):
-        lines.append("Geometry/hierarchy snapshot from the CAD export named in the build record; not an accepted BOM, not a purchase list.")
+        lines.append("Geometry and hierarchy come from the CAD export named in the build record. "
+                     "Quantities are CAD instance counts, not purchase quantities, kits, stock or an approved bill of materials.")
     if sc.source.get("kind") == "synthetic":
         lines.append("Synthetic documentation fixture: not a product, not a manufactured design, not a project component.")
-    lines.append("Approach arrows are unverified render hints; they do not prove an insertion path or tool access.")
-    lines.append("Required quantities come from the CAD scene. Stock is unknown until counted and recorded.")
+    if has_groups:
+        lines.append("Subassembly pages are inspection views of parts at their CAD positions; they are not assembly steps and imply no sequence, fasteners or tool access.")
+    if sc.coincident:
+        names = sorted({sc.parts[c["part_id"]].name for c in sc.coincident})
+        lines.append(f"CAD ambiguity: {len(sc.coincident)} pair(s) of occurrences of the same part share one position ({'; '.join(names)}). "
+                     "All source instances are kept and counted; review the intended configuration before treating the count as stock.")
+    if ins is not None:
+        lines.append("Approach arrows are unverified render hints; they do not prove an insertion path or tool access.")
+    lines.append("Stock is unknown until counted and recorded.")
     if render_receipt.get("preview"):
         lines.append("Preview-quality renders.")
     return lines
 
 
+def model_images(model):
+    names = {row["thumbnail"] for row in model["inventory"]} | {row["end_view"] for row in model["inventory"] if row["end_view"]}
+    names |= {model["overview_image"]} | {g["image"] for g in model["groups"]}
+    names |= {s["image"] for s in model["steps"]} | {s["result_image"] for s in model["steps"] if s["result_image"]}
+    return sorted(names)
+
+
 def stage_images(model, renders_dir, out_dir):
-    images = sorted({row["thumbnail"] for row in model["inventory"]} | {model["overview_image"]}
-                    | {s["image"] for s in model["steps"]} | {s["result_image"] for s in model["steps"] if s["result_image"]})
     dst = Path(out_dir) / "images"
     dst.mkdir(parents=True, exist_ok=True)
     staged = {}
-    for name in images:
+    for name in model_images(model):
         src = Path(renders_dir) / name
         if not src.is_file():
             raise DocumentError(f"render {name} listed in the receipt is missing from {renders_dir}")
@@ -229,7 +318,7 @@ def build(args):
     rr = receipts.read_json(rr_path)
     mr = receipts.read_json(args.meshes) if args.meshes else None
     try:
-        model = build_model(project, rr, mr)
+        model = build_model(project, rr, mr, appendix=getattr(args, "appendix", False))
         out.mkdir(parents=True, exist_ok=True)
         staged = stage_images(model, renders, out)
     except DocumentError as e:
@@ -248,6 +337,7 @@ def build(args):
         "kind": "mechanical-docs-build-receipt", "generated_at_utc": receipts.utc_now(), **receipts.python_info(),
         "project_dir": str(project.dir), "input_hashes": project.input_hashes(),
         "render_receipt": receipts.file_entry(rr_path), "meshes_receipt": receipts.file_entry(args.meshes) if args.meshes else None,
+        "appendix_printed": model["appendix"], "groups": [g["id"] for g in model["groups"]],
         "outputs": {"manual.json": receipts.file_entry(out / "manual.json", out), "index.html": receipts.file_entry(out / "index.html", out),
                     "manual.typ": receipts.file_entry(typ_path, out), "images": staged},
         "pdf": pdf_info,
