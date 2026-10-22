@@ -91,7 +91,13 @@ row does not invalidate a receipt; image hash re-verified, `reused_from`
 and `reused_generated_at_utc` on the view record naming the receipt that
 rendered it; a view copied again in a later pass keeps that original
 provenance and lists the intermediate receipts in `reused_via`) and renders
-only the views named in `--views` or absent from that receipt; the enclosure's project-side `render.json` caps line art at
+only the views named in `--views`, absent from that receipt, or stale under
+the current settings (`reuse.py`: a joint close-up whose occurrences, context,
+context style or explicit direction changed, and any view drawn without
+outlines that the current `lines.max_triangles` would now outline; a lower
+budget never discards an outlined image, so the 32-minute overview survives;
+the receipt lists the stale ones in `stale_reused_views`; other appearance
+changes such as looks, group directions or `--no-lines` still need `--views`); the enclosure's project-side `render.json` caps line art at
 400 000 visible triangles, so no full-assembly view runs Freestyle. Measured on
 2026-10-22 on the enclosure (Cycles, denoiser, 64 adaptive samples): seven wide
 1200 × 600 thumbnails of long extrusions 21 to 22 s each with the floor, their
@@ -99,6 +105,14 @@ only the views named in `--views` or absent from that receipt; the enclosure's p
 (1600 × 1200, floor, Freestyle on 55 000 to 91 000 visible triangles) 62 to
 82 s each; 17 views rendered and 31 reused in 6 min 25 s for the whole receipt,
 against 39 min for the full first render.
+
+The shadow-catcher floor sits just under the lowest visible point of a view;
+a camera at or below that plane (a joint seen from below the frame) would see
+only the catcher, so such a view is rendered without the floor, recorded per
+view in `floor_shadow_catcher`. Freestyle on a frame context at the 600 000
+budget: the camera frame group (472 340 triangles) took 446 s and the
+free-standing frame (546 280) 233 s on 2026-10-22, against 147 s for the
+tank support frame at 343 000.
 
 A joint close-up (`joint_views`) costs about what a subassembly view costs
 at the same size: on the three-part fixture at 1600 × 1200 with the floor,

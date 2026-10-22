@@ -241,7 +241,7 @@ def render(model, out_dir, embed_images=False):
         jslug = slug(j["joint_id"])
         o.append(f'<section class="joint" id="joint-{jslug}" data-joint="{e(j["joint_id"])}" data-index="{j["index"]}">')
         o.append(f'<header><div class="step-number">{j["index"]}</div><div><div class="kicker">Joint close-up</div><div style="font-size:1.2rem;font-weight:700"><code>{e(j["joint_id"])}</code></div>'
-                 f'<div class="step-title">context <code>{e(j["context_assembly"])}</code> ({e(j["context_style"])}, {len(j["context_occurrences"])} other occurrence(s))</div></div></header>')
+                 f'<div class="step-title">context <code>{e(j["context_text"])}</code> ({e(j["context_style"])}, {len(j["context_occurrences"])} other occurrence(s))</div></div></header>')
         o.append('<figure><div class="overview-wrap">')
         o.append(f'<img src="{src(j["image"])}" alt="Joint {j["index"]}: {e(j["joint_id"])}">')
         o.append(callouts_svg(model, out_dir, j["view_id"]))
@@ -334,7 +334,7 @@ def render(model, out_dir, embed_images=False):
             o.append(f'<p class="hint"><strong>Subassembly {g["index"]} {e(g["id"])}</strong> (path {" / ".join(e(x) for x in g["path"])}): '
                      + "; ".join(f'{e(oc["id"])} → part {oc["label"]}' for oc in g["occurrences"]) + "</p>")
         for j in model["joints"]:
-            o.append(f'<p class="hint"><strong>Joint {j["index"]} {e(j["joint_id"])}</strong> (context {e(j["context_assembly"])}, {e(j["context_style"])}): '
+            o.append(f'<p class="hint"><strong>Joint {j["index"]} {e(j["joint_id"])}</strong> (context {e(j["context_text"])}, {e(j["context_style"])}): '
                      + "; ".join(f'{e(oc["id"])} → part {oc["label"]}' for oc in j["occurrences"]) + f'; context occurrences: {"; ".join(e(x) for x in j["context_occurrences"]) or "none"}</p>')
         stock_rows = [row for row in model["inventory"] if row.get("intended_configuration_confirmed") is not None]
         if stock_rows:

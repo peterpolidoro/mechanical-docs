@@ -127,9 +127,14 @@ def test_model_rejects_stale_or_partial_receipt(rendered):
     bad = dict(receipt); bad["views"] = [dict(v, context_occurrences=[]) if v["id"] == "joint-pin-to-base" else v for v in receipt["views"]]
     with pytest.raises(document.DocumentError, match="context does not list exactly"):
         document.build_model(project, bad)
-    bad = dict(receipt); bad["views"] = [dict(v, context_assembly="pin-pair", context_occurrences=["pin-b"]) if v["id"] == "joint-pin-to-base" else v for v in receipt["views"]]
-    with pytest.raises(document.DocumentError, match="are not under 'pin-pair'"):
+    bad = dict(receipt); bad["views"] = [dict(v, context_assembly="nowhere", context_occurrences=["pin-b"]) if v["id"] == "joint-pin-to-base" else v for v in receipt["views"]]
+    with pytest.raises(document.DocumentError, match="unknown context 'nowhere'"):
         document.build_model(project, bad)
+    # a context list (a group plus an occurrence) is accepted when the record lists exactly its other occurrences
+    ok = dict(receipt); ok["views"] = [dict(v, context_ids=["pin-pair", "base-1"], context_assembly=None, context_occurrences=["pin-b", "base-1"], occurrence_ids=["pin-a"], visible=["pin-a", "pin-b", "base-1"])
+                                       if v["id"] == "joint-pin-to-base" else v for v in receipt["views"]]
+    j = document.build_model(project, ok)["joints"][0]
+    assert j["context_ids"] == ["pin-pair", "base-1"] and j["context_assembly"] is None and j["context_text"] == "pin-pair, base-1" and j["context_occurrences"] == ["base-1", "pin-b"]
 
 
 def test_html_and_typst_carry_the_same_content(rendered, tmp_path):

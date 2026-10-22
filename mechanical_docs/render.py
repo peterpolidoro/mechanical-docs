@@ -39,8 +39,10 @@ web callouts. render-receipt.json records versions, settings, hashes and checks.
 --reuse RENDER_DIR copies views from an earlier complete receipt made from the
 same scene, assets, instructions, meshes, engine and quality instead of
 rendering them again (the inventory and the supplement never change an image,
-so they may differ); only views named in --views or absent from that receipt
-are rendered. Each copied
+so they may differ); only views named in --views, absent from that receipt, or
+stale under the current settings (a joint view whose specification changed, a
+view whose line-art state would differ under the current budget; see reuse.py)
+are rendered. Other appearance changes need --views. Each copied
 view keeps its own record plus `reused_from`, so the receipt stays honest about
 what was rendered when and under which settings.
 
@@ -67,6 +69,7 @@ from mechanical_docs.manifest import ManifestError, load_project  # noqa: E402
 from mechanical_docs.names import slug  # noqa: E402
 from mechanical_docs.procedure import approach_pose, derive_states  # noqa: E402
 from mechanical_docs.render_settings import load_settings  # noqa: E402
+from mechanical_docs.reuse import stale_reason  # noqa: E402
 
 import bpy  # noqa: E402  (only inside Blender)
 from bpy_extras.object_utils import world_to_camera_view  # noqa: E402
@@ -116,19 +119,31 @@ def resolve_joint_views(scene, specs):
                 raise SystemExit(f"{where}: {oid!r} is not an occurrence id in the scene{hint}")
         ctx = jv.get("context")
         if ctx is None:
-            ctx = common_ancestor(scene, jv["occurrence_ids"])
-        elif ctx not in scene.assemblies:
-            raise SystemExit(f"{where}: context {ctx!r} is not an assembly id in the scene")
+            ctx_ids = [common_ancestor(scene, jv["occurrence_ids"])]
         else:
-            outside = [o for o in jv["occurrence_ids"] if ctx not in scene.occurrences[o].path]
-            if outside:
-                raise SystemExit(f"{where}: occurrence(s) {outside} are not under the context assembly {ctx!r}")
+            # an explicit context is any set of assembly and/or occurrence ids; the
+            # subjects need not lie under it (a joint between two groups fades one frame)
+            ctx_ids = [ctx] if isinstance(ctx, str) else list(ctx)
+            for c in ctx_ids:
+                if c not in scene.assemblies and c not in scene.occurrences:
+                    raise SystemExit(f"{where}: context {c!r} is not an assembly or occurrence id in the scene")
         vid = f"joint-{slug(jv.get('id') or jv['joint_id'])}"
         if vid in seen:
             raise SystemExit(f"{where}: view id {vid!r} repeats; give each view of a joint its own 'id'")
         seen.add(vid)
         out.append({"view_id": vid, "id": jv.get("id"), "joint_id": jv["joint_id"], "occurrence_ids": list(jv["occurrence_ids"]),
-                    "direction": jv.get("direction"), "context": ctx, "context_style": jv["context_style"]})
+                    "direction": jv.get("direction"), "context": ctx_ids, "context_style": jv["context_style"]})
+    return out
+
+
+def context_members(scene, ctx_ids):
+    """Occurrence ids of the context: every occurrence under each assembly id,
+    plus each occurrence id itself; scene order, no repeats."""
+    out = []
+    for c in ctx_ids:
+        for oid in (scene.members(c) if c in scene.assemblies else [c]):
+            if oid not in out:
+                out.append(oid)
     return out
 
 
@@ -508,6 +523,10 @@ class Renderer:
             bpy.context.view_layer.update()
             return
         self.floor.location = Vector((self.scene_centre.x, self.scene_centre.y, min(p.z for p in pts) - 1e-4))
+        # a camera at or below the catcher plane would see only the catcher (a view
+        # from below the frame): no floor for such a view, recorded per view
+        if self.cam.matrix_world.translation.z <= self.floor.location.z + 1e-6:
+            self.floor.hide_render = True
         bpy.context.view_layer.update()
 
     def visible_triangles(self):
@@ -746,8 +765,8 @@ class Renderer:
         view_id = spec["view_id"]
         self.restore()
         subject = list(spec["occurrence_ids"])
-        ctx_asm = spec["context"]; style = spec["context_style"]
-        context = [oid for oid in self.group_members(ctx_asm) if oid not in subject]
+        ctx_ids = list(spec["context"]); style = spec["context_style"]
+        context = [oid for oid in context_members(self.scene, ctx_ids) if oid not in subject]
         for oid, o in self.obj_of.items():
             if oid in subject:
                 self.coll_subject.objects.link(o)
@@ -772,7 +791,8 @@ class Renderer:
         occ = self.scene.occurrences
         rec = self.view_record(view_id, path, secs, kind="joint", joint_id=spec["joint_id"], occurrence_ids=subject,
                                occurrences=[{"id": oid, "part_id": occ[oid].part_id, "parent_id": occ[oid].parent_id} for oid in subject],
-                               context_assembly=ctx_asm, context_style=style, context_occurrences=context,
+                               context_ids=ctx_ids, context_assembly=ctx_ids[0] if len(ctx_ids) == 1 and ctx_ids[0] in self.scene.assemblies else None,
+                               context_style=style, context_occurrences=context,
                                hidden=[oid for oid in self.obj_of if oid not in visible], visible=visible,
                                direction=[round(v, 4) for v in d], direction_from_settings=spec.get("direction") is not None,
                                poses="canonical", exploded=False, framed=framed, extent_m=[round(v, 4) for v in (mx - mn)],
@@ -875,13 +895,20 @@ class Renderer:
         views = []
         old = {v["id"]: v for v in reuse["views"]} if reuse else {}
         missing = []
+        self.stale = {}
+        joint_specs = {jv["view_id"]: jv for jv in joints}
+        budget = self.s["lines"]["preview_max_triangles" if self.preview else "max_triangles"]
         for view_id, fn in self.plan(groups, joints):
             wanted = not only or view_id in only
             if reuse is not None and view_id in old and not (only and view_id in only):
-                rec = self.reuse_view(old[view_id], reuse)
-                views.append(rec)
-                log(f"{view_id}: reused from {reuse['receipt_path']} ({rec['width']}x{rec['height']}, {rec['seconds']}s then)")
-                continue
+                reason = stale_reason(old[view_id], joint_specs, self.lines_enabled, budget)
+                if reason is None:
+                    rec = self.reuse_view(old[view_id], reuse)
+                    views.append(rec)
+                    log(f"{view_id}: reused from {reuse['receipt_path']} ({rec['width']}x{rec['height']}, {rec['seconds']}s then)")
+                    continue
+                self.stale[view_id] = reason
+                log(f"{view_id}: earlier view is stale ({reason}); rendering")
             if not wanted and reuse is None:
                 missing.append(view_id)
                 continue
@@ -983,7 +1010,7 @@ def main(argv):
         "mesh_hashes": {pid: rec["mesh"]["sha256"] for pid, rec in meshes["parts"].items()},
         "partial": bool(missing), "missing_views": missing, "inventory_only": project.instructions is None,
         "inspection_groups": groups, "joint_views": joints, "reused_from": reuse["receipt_path"] if reuse else None, "reused_views": reused,
-        "rendered_views": [v["id"] for v in views if not v.get("reused_from")], "views": views,
+        "rendered_views": [v["id"] for v in views if not v.get("reused_from")], "stale_reused_views": r.stale, "views": views,
         "checks": r.checks, "warnings": r.warnings,
         "all_checks_passed": not r.checks["problems"] and all(c["passed"] for c in r.checks["mesh_bounds_match"]) and all(c["passed"] for c in r.checks["restoration"]),
         "not_checked": ["image legibility (inspect the PNGs)", "insertion path or tool access", "physical assembly"],

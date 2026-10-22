@@ -16,7 +16,8 @@ mailbox and evidence paths; the tracked documentation stays usable without them.
 - `mechanical_docs/`: `manifest.py` (validation, production fields, +Y-up basis,
   the inventory stock record, `supplement.json`), `names.py` (slugs for
   free-form ids), `stepinfo.py` (declared STEP unit), `transforms.py`,
-  `procedure.py`, `gltf.py`, `geometry.py`, `receipts.py`, `render_settings.py`
+  `procedure.py`, `gltf.py`, `geometry.py`, `receipts.py`, `reuse.py` (which
+  earlier views are stale under new settings), `render_settings.py`
   (looks, budgets, long-part thumbnail rules, `inspection_groups`,
   `joint_views`), `cad_mesh.py` (FreeCADCmd, triangle budget), `render.py`
   (Blender, Cycles default, line budget, wide thumbnails and end views for long

@@ -280,16 +280,19 @@ ids, parent and path.
 `joint_id` (the project's joint key, required), `occurrence_ids` (the specific
 occurrences forming the joint, required, each must exist, none repeated),
 optional `direction` (three numbers; otherwise `joint_direction` with the
-flat-group facing rule), optional `context` (an assembly id containing every
-listed occurrence; default the occurrences' deepest common ancestor), optional
+flat-group facing rule), optional `context` (an assembly id, an occurrence id
+or a list of them whose occurrences are drawn as context; the listed subject
+occurrences need not lie under it, so a joint between two groups can fade just
+one frame; default the occurrences' deepest common ancestor), optional
 `context_style` (`faded`, the default from `joint_context_style`, draws the
 context's other occurrences as flat grey silhouettes with thin outlines;
 `hidden` leaves them out) and optional `id` (when one joint needs several
 views; the image is `joint-<id or joint_id>.png`). The view frames the union
 bounds of the listed occurrences at their canonical poses, everything outside
 the context is hidden, the camera sits outside the whole scene so nothing is
-cut, and the receipt records the joint id, the occurrence ids, the context
-assembly, the context occurrences and the hidden ones. `joint_fill` sets the
+cut, the shadow-catcher floor is dropped for a camera at or below the floor
+plane (a view from below), and the receipt records the joint id, the
+occurrence ids, the context ids, the context occurrences and the hidden ones. `joint_fill` sets the
 framing margin. These are inspection views, not steps: nothing moves and no
 fastener is drawn.
 
@@ -299,7 +302,7 @@ fastener is drawn.
 | --- | --- | --- |
 | `inspect.json` | `python3 -m mechanical_docs inspect` | validated parts, occurrences with world transforms, steps with cumulative state, inventory reconciliation with stock records, the supplement's rows and summary (by scope, kind, status; unknown quantities; unplaced rows), input hashes |
 | `meshes/<part>.glb`, `meshes/meshes.json` | `cad_mesh.py` (FreeCADCmd) | one GLB per part (metres, +Y up, conversion recorded in the asset extras), declared STEP unit versus manifest unit, STEP validity/bounds/volume, mesh winding and volume checks, tessellation attempts under the per-part triangle budget, hashes |
-| `renders/*.png`, `renders/hotspots/*.json`, `renders/render-receipt.json` | `render.py` (Blender) | thumbnails (wide ones plus end views for long parts), overview, subassembly inspection views (`group-*.png` with occurrence ids, parent and path), joint close-ups (`joint-*.png` with joint id, occurrence ids, context assembly and context occurrences), step and result images; projected occurrence boxes; versions, engine, denoiser, settings hash, per-view hashes, visible triangles and whether line art was drawn, which views were copied from an earlier receipt (`--reuse`: same scene, assets, instructions, meshes and engine; the inventory and supplement may differ; `reused_from` per view), mesh-bounds and pose-restoration checks |
+| `renders/*.png`, `renders/hotspots/*.json`, `renders/render-receipt.json` | `render.py` (Blender) | thumbnails (wide ones plus end views for long parts), overview, subassembly inspection views (`group-*.png` with occurrence ids, parent and path), joint close-ups (`joint-*.png` with joint id, occurrence ids, context assembly and context occurrences), step and result images; projected occurrence boxes; versions, engine, denoiser, settings hash, per-view hashes, visible triangles and whether line art was drawn, which views were copied from an earlier receipt (`--reuse`: same scene, assets, instructions, meshes and engine; the inventory and supplement may differ; a copy is refused when the view's joint specification changed or outlines became affordable; `reused_from` per view, `stale_reused_views` per receipt), mesh-bounds and pose-restoration checks |
 | `manual/manual.json`, `index.html`, `manual.typ`, `<id>.pdf`, `build-receipt.json` | `python3 -m mechanical_docs manual [--appendix]` | the single document model and both outputs generated from it: picture-led parts cards (CAD quantity labelled as such, stock record when recorded, paper count box), the supplementary items section (existing-design rows), one page per subassembly inspection view and per joint close-up with their "hardware to review" lists, overview, steps, a compact build record; `--appendix` adds the technical appendix (full part ids, Vault ids, occurrence lists, every hash, every supplement row and field, stock records), which manual.json always carries |
 | `manual/check-report.json`, `manual/checks/` | `python3 -m mechanical_docs check` | HTML/PDF/manual.json agreement (parts, CAD quantities, subassembly sections and their part counts, joint sections, supplementary rows and the per-group/per-joint hardware lists, step order; supplementary rows separate from CAD parts with unknown quantities kept unknown), link and image resolution, page rasters and greyscale copies |
 

@@ -66,8 +66,9 @@ DEFAULTS = {
     "group_fill": 0.84,
     # Per-joint close-ups: each entry names a project joint id and the specific
     # occurrences that form the joint; they are framed alone at their canonical
-    # poses while the rest of the context assembly (default: their deepest common
-    # ancestor) is drawn faded or hidden. Inspection views, not steps.
+    # poses while the context (default: their deepest common ancestor; or any
+    # assembly/occurrence ids, so a joint between two groups can fade just one
+    # frame) is drawn faded or hidden. Inspection views, not steps.
     #   {"joint_id": "caster_to_plate", "occurrence_ids": ["…/CASTER:1", "…/PLATE:1"],
     #    "direction": [1, -1.2, 0.8], "context": "FREE STANDING FRAME:1/CASTER ASSEMBLY:1",
     #    "context_style": "faded", "id": "caster_to_plate-1"}
@@ -146,8 +147,9 @@ def check_joint_views(views, context_style):
             raise SettingsError(f"{where}.occurrence_ids: an occurrence is listed twice")
         if "direction" in jv and not _vec3(jv["direction"]):
             raise SettingsError(f"{where}.direction: expected three numbers")
-        if "context" in jv and (not isinstance(jv["context"], str) or not jv["context"]):
-            raise SettingsError(f"{where}.context: expected an assembly id")
+        ctx = jv.get("context")
+        if "context" in jv and not ((isinstance(ctx, str) and ctx) or (isinstance(ctx, list) and ctx and all(isinstance(c, str) and c for c in ctx))):
+            raise SettingsError(f"{where}.context: expected an assembly or occurrence id, or a list of them")
         style = jv.get("context_style", context_style)
         if style not in JOINT_CONTEXT_STYLES:
             raise SettingsError(f"{where}.context_style: expected one of {JOINT_CONTEXT_STYLES}, got {style!r}")

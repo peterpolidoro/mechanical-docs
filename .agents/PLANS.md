@@ -59,6 +59,20 @@ is untouched until the Linux agent writes its CSV mapping and joint overlay.
   from the 14:12 receipt in 838 s; compact PDF 36 pages, appendix 54 pages,
   23 checks passed each, none failed. Receipt checks scoped per stage so the
   new inventory and supplement did not force a CAD or full render re-run.
+- [x] Second enclosure build with the Linux agent's adjusted overlay (17:37 UTC:
+  seven joint views redirected along the review, `lines.max_triangles`
+  600 000, one project note in `inventory.json`): 12 views rendered in two
+  passes (12 found stale by `reuse.py`: changed joint specifications and
+  outlines newly within budget; two views rendered again after the
+  below-floor floor fix), the rest reused, 1354 s + 73 s; compact PDF
+  36 pages, appendix 54 pages, 23 checks passed each, none
+  failed; the project note prints on the status block. Frame groups with
+  outlines at 600 000: camera frame 446 s, free-standing frame 233 s.
+- [x] Renderer fixes found by this build: no shadow-catcher floor for a camera
+  at or below the floor plane (a view from below saw only the catcher);
+  joint `context` may be a list of assembly/occurrence ids not containing the
+  subject (a joint between two groups can fade one frame); recorded joint
+  directions compared with a tolerance.
 
 ## Previous checkpoint — 2026-10-22 (technician inventory, subassembly inspection views, unit regression)
 
@@ -250,6 +264,12 @@ done while Peter was away; all output stays `draft`.
   engine and quality for reuse). A changed inventory or supplement therefore
   never forces a CAD or render re-run (neither file changes a pixel); the
   manual re-reads both, and every receipt still records every input hash.
+- A reused view is checked per view before it is copied (`reuse.py`): a joint
+  close-up whose occurrences, context, context style or explicit direction
+  changed, or any view drawn without outlines that the current line budget
+  would now outline, is rendered again; a lower budget never discards an
+  outlined image (the budget caps cost, it is not a look), so the 32-minute
+  overview survives every rebuild. Other appearance changes need `--views`.
 - Project prose stays in the project: `inventory.json` may carry `notes`
   (sentences printed verbatim on the status block, e.g. an intended build
   change), produced by the project recipe; nothing of the kind is authored in

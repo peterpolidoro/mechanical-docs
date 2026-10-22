@@ -154,7 +154,7 @@ def render(model):
     for j in model["joints"]:
         w("#pagebreak(weak: true)")
         w(f"== Joint {j['index']}: {esc(j['joint_id'])}")
-        w(f"#text(size: 8pt, fill: luma(90))[context {raw(j['context_assembly'])} ({esc(j['context_style'])}, {len(j['context_occurrences'])} other occurrence(s))]")
+        w(f"#text(size: 8pt, fill: luma(90))[context {raw(j['context_text'])} ({esc(j['context_style'])}, {len(j['context_occurrences'])} other occurrence(s))]")
         w("")
         w(f"#text(size: 9pt)[{esc(j['note'])}.]")
         w("")
@@ -258,7 +258,7 @@ def render(model):
         for g in model["groups"]:
             w(f"*Subassembly {g['index']} {esc(g['id'])}* (path {esc(' / '.join(g['path']))}): " + "; ".join(f"{esc(oc['id'])} → part {oc['label']}" for oc in g["occurrences"]) + "\n")
         for j in model["joints"]:
-            w(f"*Joint {j['index']} {esc(j['joint_id'])}* (context {esc(j['context_assembly'])}, {esc(j['context_style'])}): "
+            w(f"*Joint {j['index']} {esc(j['joint_id'])}* (context {esc(j['context_text'])}, {esc(j['context_style'])}): "
               + "; ".join(f"{esc(oc['id'])} → part {oc['label']}" for oc in j["occurrences"]) + "; context occurrences: " + (esc("; ".join(j["context_occurrences"])) or "none") + "\n")
         stock_rows = [row for row in model["inventory"] if row.get("intended_configuration_confirmed") is not None]
         if stock_rows:

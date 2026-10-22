@@ -232,15 +232,17 @@ def build_model(project, render_receipt, meshes_receipt=None, appendix=False):
         for oid in subject:
             if oid not in sc.occurrences:
                 raise DocumentError(f"render receipt view {v['id']} names unknown occurrence {oid!r}")
-        ctx = v["context_assembly"]
-        if ctx not in sc.assemblies:
-            raise DocumentError(f"render receipt view {v['id']} names unknown context assembly {ctx!r}")
-        outside = [oid for oid in subject if ctx not in sc.occurrences[oid].path]
-        if outside:
-            raise DocumentError(f"render receipt view {v['id']}: occurrence(s) {outside} are not under {ctx!r}")
-        rest = sorted(oid for oid in sc.members(ctx) if oid not in subject)
+        ctx_ids = v.get("context_ids") or [v.get("context_assembly")]
+        for c in ctx_ids:
+            if c not in sc.assemblies and c not in sc.occurrences:
+                raise DocumentError(f"render receipt view {v['id']} names unknown context {c!r}")
+        members = []
+        for c in ctx_ids:
+            members += [oid for oid in (sc.members(c) if c in sc.assemblies else [c]) if oid not in members]
+        rest = sorted(oid for oid in members if oid not in subject)
         if sorted(v.get("context_occurrences", [])) != rest:
-            raise DocumentError(f"render receipt view {v['id']}: context does not list exactly the other occurrences under {ctx!r}")
+            raise DocumentError(f"render receipt view {v['id']}: context does not list exactly the other occurrences of {ctx_ids}")
+        ctx = ctx_ids[0] if len(ctx_ids) == 1 else None
         counts = {}
         for oid in subject:
             counts[sc.occurrences[oid].part_id] = counts.get(sc.occurrences[oid].part_id, 0) + 1
@@ -250,7 +252,8 @@ def build_model(project, render_receipt, meshes_receipt=None, appendix=False):
                              "label_text": display_name(sc.parts[sc.occurrences[oid].part_id]), "parent_id": sc.occurrences[oid].parent_id,
                              "thumbnail": view_file(f"part-{slug(sc.occurrences[oid].part_id)}")} for oid in subject],
             "parts": [{"part_id": pid, "label": label_of[pid], "label_text": display_name(sc.parts[pid]), "qty": q} for pid, q in sorted(counts.items(), key=lambda kv: label_of[kv[0]])],
-            "context_assembly": ctx, "context_short": ctx.split("/")[-1], "context_style": v.get("context_style"), "context_occurrences": rest,
+            "context_assembly": ctx, "context_ids": ctx_ids, "context_text": ", ".join(ctx_ids), "context_short": ", ".join(c.split("/")[-1] for c in ctx_ids),
+            "context_style": v.get("context_style"), "context_occurrences": rest,
             "direction": v.get("direction"), "poses": v.get("poses", "canonical"), "exploded": bool(v.get("exploded", False)),
             "note": v.get("note", "inspection view, not a step"),
             "hardware": [],

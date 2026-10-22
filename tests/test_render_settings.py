@@ -36,8 +36,12 @@ def test_joint_views_are_validated_structurally(tmp_path):
         settings([{"joint_id": "x", "occurrence_ids": ["a"], "direction": [1, 2]}])
     with pytest.raises(SettingsError, match="context_style: expected one of"):
         settings([{"joint_id": "x", "occurrence_ids": ["a"], "context_style": "exploded"}])
+    with pytest.raises(SettingsError, match="context: expected an assembly or occurrence id, or a list"):
+        settings([{"joint_id": "x", "occurrence_ids": ["a"], "context": ["G", 3]}])
     s, _ = settings([{"joint_id": "x", "occurrence_ids": ["a", "b"], "context": "G", "context_style": "hidden", "id": "x-1"}])
     assert s["joint_views"] == [{"id": "x-1", "joint_id": "x", "occurrence_ids": ["a", "b"], "direction": None, "context": "G", "context_style": "hidden"}]
+    s, _ = settings([{"joint_id": "x", "occurrence_ids": ["a"], "context": ["G", "occ-1"]}])
+    assert s["joint_views"][0]["context"] == ["G", "occ-1"]
 
 
 def test_unknown_field_rejected(tmp_path):
