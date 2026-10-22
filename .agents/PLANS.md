@@ -68,6 +68,11 @@ is untouched until the Linux agent writes its CSV mapping and joint overlay.
   36 pages, appendix 54 pages, 23 checks passed each, none
   failed; the project note prints on the status block. Frame groups with
   outlines at 600 000: camera frame 446 s, free-standing frame 233 s.
+- [x] Third enclosure build (Linux overlay of 18:31 UTC: `clamp_mount_to_frame`
+  with the list context `["FREE STANDING FRAME:1"]`): one view rendered in 64 s,
+  66 reused; compact PDF 36 pages, appendix 54 pages, 23 checks passed each.
+  All sixteen joint close-ups now show their attachment, fourteen with
+  outlines; the enclosure's joint-view set is complete for this snapshot.
 - [x] Renderer fixes found by this build: no shadow-catcher floor for a camera
   at or below the floor plane (a view from below saw only the catcher);
   joint `context` may be a list of assembly/occurrence ids not containing the
@@ -279,6 +284,14 @@ done while Peter was away; all output stays `draft`.
   project team's; the fixtures prove tooling, not an enclosure procedure.
 
 ## Verification and handoff
+
+Third enclosure build, observed on 2026-10-22: overlay verified against its
+SHA256SUMS; `reuse.py` re-rendered exactly the one view whose context changed
+(63 s, 549 892 visible triangles with outlines), 66 views reused; compact PDF
+36 pages and appendix 54 pages, 23 checks passed and 2 not applicable each;
+the rebuilt view inspected at full size. Evidence
+`evidence/2026-10-22-documentation-enclosure-supplement-03/`. The working tree
+is Peter's 8172a92 plus these notes.
 
 Enclosure build with the Linux overlay, observed on 2026-10-22 (same host and
 tools): overlay files verified against their SHA256SUMS and staged beside the

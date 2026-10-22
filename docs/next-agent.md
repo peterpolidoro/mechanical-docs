@@ -66,10 +66,12 @@ owns the project-side configuration.
 
 1. The enclosure now builds with the Linux agent's overlay (`supplement.json`
    with 20 family rows, 16 `joint_views`, a stock record on every inventory
-   row; evidence run `2026-10-22-documentation-enclosure-supplement-01`). Next:
-   the Linux agent adjusts joint instances or directions from the per-view
-   notes in that reply; rebuild with `--reuse` (only changed close-ups render).
-   Do not invent rows or views.
+   row; evidence runs `2026-10-22-documentation-enclosure-supplement-01` to
+   `-03`). All sixteen joint close-ups show their attachment after two rounds
+   of direction and context adjustments by the Linux agent; a further overlay
+   change needs only `--reuse` on the latest receipt (`reuse.py` re-renders
+   exactly the views whose specification or outline state changed). Do not
+   invent rows or views.
 2. Peter's review of the picture-led inventory, the subassembly pages and the
    new supplementary section (labels, card size, inch equivalents, whether
    the supplementary table belongs in the technician PDF as decided).
