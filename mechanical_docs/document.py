@@ -21,6 +21,7 @@ from pathlib import Path
 
 from . import receipts
 from .manifest import ManifestError, load_project
+from .names import slug
 from .procedure import derive_states
 from . import html as html_out
 from . import typst as typst_out
@@ -34,15 +35,16 @@ def dimensions_text(dims):
     """'100 × 60 × 8 mm, hole Ø10.5 mm' from identifying_dimensions_mm."""
     if not dims:
         return ""
-    order = ["width", "depth", "height", "length", "diameter", "thickness"]
     box = [dims[k] for k in ("width", "depth", "height") if k in dims]
     parts = []
     if len(box) == 3:
         parts.append(" × ".join(fmt(v) for v in box) + " mm")
+    if "extent" in dims:
+        parts.append("extent " + " × ".join(fmt(round(v, 1)) for v in dims["extent"]) + " mm")
     if "diameter" in dims and "length" in dims:
         parts.append(f"Ø{fmt(dims['diameter'])} × {fmt(dims['length'])} mm")
     for k, v in dims.items():
-        if k in ("width", "depth", "height") and len(box) == 3:
+        if k == "extent" or (k in ("width", "depth", "height") and len(box) == 3):
             continue
         if k in ("diameter", "length") and "diameter" in dims and "length" in dims:
             continue
@@ -58,9 +60,27 @@ def fmt(v):
     return f"{v:g}"
 
 
+def part_details(part):
+    """Short provenance/metadata line for a part when the exporter supplied it."""
+    bits = []
+    pr = part.properties or {}
+    if pr.get("part_number"):
+        bits.append(f"P/N {pr['part_number']}")
+    for k in ("material", "vendor", "manufacturer"):
+        if pr.get(k):
+            bits.append(str(pr[k]))
+    if part.model_state:
+        bits.append(part.model_state)
+    if part.bodies and part.bodies.get("solid_bodies", 1) != 1:
+        bits.append(f"{part.bodies['solid_bodies']} bodies")
+    if part.bom_structure_default and part.bom_structure_default != "Normal":
+        bits.append(f"BOM {part.bom_structure_default}")
+    return " · ".join(bits)
+
+
 def build_model(project, render_receipt, meshes_receipt=None):
     sc, ins, inv = project.scene, project.instructions, project.inventory
-    states = derive_states(ins, sc)
+    states = derive_states(ins, sc) if ins is not None else []
     views = {v["id"]: v for v in render_receipt["views"]}
     if render_receipt.get("partial"):
         raise DocumentError("render receipt is partial (--views); render every view before building the manual")
@@ -85,16 +105,19 @@ def build_model(project, render_receipt, meshes_receipt=None):
         inventory.append({
             "label": n, "part_id": part.id, "name": part.name, "description": part.description,
             "dimensions": dimensions_text(part.identifying_dimensions_mm), "identifying_dimensions_mm": part.identifying_dimensions_mm,
+            "details": part_details(part), "properties": part.properties, "model_state": part.model_state,
+            "bom_structure_default": part.bom_structure_default, "bodies": part.bodies, "source": part.source,
             "required": item.required, "unit": item.unit, "counted": item.counted,
-            "occurrences": [o.id for o in sc.occurrences_of(part.id)],
-            "thumbnail": view_file(f"part-{part.id}"),
+            "occurrences": [o.id for o in sc.installed_occurrences_of(part.id)],
+            "reference_occurrences": [o.id for o in sc.occurrences_of(part.id) if not o.installed],
+            "thumbnail": view_file(f"part-{slug(part.id)}"),
         })
     steps = []
     for st in states:
         needed = []
         for pid, qty in st.parts_needed.items():
-            needed.append({"part_id": pid, "label": label_of[pid], "name": sc.parts[pid].name, "qty": qty, "thumbnail": view_file(f"part-{pid}")})
-        vid = f"step-{st.index:02d}-{st.step.id}"
+            needed.append({"part_id": pid, "label": label_of[pid], "name": sc.parts[pid].name, "qty": qty, "thumbnail": view_file(f"part-{slug(pid)}")})
+        vid = f"step-{st.index:02d}-{slug(st.step.id)}"
         ap = st.step.approach
         steps.append({
             "index": st.index, "id": st.step.id, "caption": st.step.caption, "requires": st.step.requires,
@@ -107,8 +130,12 @@ def build_model(project, render_receipt, meshes_receipt=None):
         })
     model = {
         "kind": "mechanical-docs-manual", "generated_at_utc": receipts.utc_now(),
-        "id": ins.id, "title": ins.title, "scene": {"id": sc.id, "title": sc.title, "units": sc.units, "source": sc.source},
-        "review_state": ins.review_state,
+        "id": ins.id if ins is not None else f"{slug(sc.id)}-inventory",
+        "title": ins.title if ins is not None else f"{sc.title}: parts inventory",
+        "scene": {"id": sc.id, "title": sc.title, "units": sc.units, "native_up_axis": sc.native_up_axis, "source": sc.source,
+                  "parts": len(sc.parts), "occurrences": len(sc.occurrences), "assemblies": len(sc.assemblies)},
+        "review_state": ins.review_state if ins is not None else "draft",
+        "inventory_only": ins is None,
         "status_lines": status_lines(project, render_receipt),
         "inventory_status": inv.status,
         "inventory": inventory,
@@ -138,7 +165,12 @@ def approach_text(offset):
 
 def status_lines(project, render_receipt):
     ins, sc = project.instructions, project.scene
-    lines = [f"Review state: {ins.review_state}. This sequence has not been physically validated."]
+    if ins is None:
+        lines = ["Parts inventory and overview only: no assembly sequence has been authored or reviewed for this scene."]
+    else:
+        lines = [f"Review state: {ins.review_state}. This sequence has not been physically validated."]
+    if sc.source.get("kind", "").startswith("autodesk-inventor"):
+        lines.append("Geometry/hierarchy snapshot from the CAD export named in the build record; not an accepted BOM, not a purchase list.")
     if sc.source.get("kind") == "synthetic":
         lines.append("Synthetic documentation fixture: not a product, not a manufactured design, not a project component.")
     lines.append("Approach arrows are unverified render hints; they do not prove an insertion path or tool access.")

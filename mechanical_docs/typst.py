@@ -52,8 +52,10 @@ def render(model):
     for row in model["inventory"]:
         found = "countbox" if row["counted"] is None else f"[{row['counted']}]"
         desc = f" \\ #text(size: 8.5pt, fill: luma(80))[{esc(row['description'])}]" if row["description"] else ""
+        details = f" \\ #text(size: 8.5pt, fill: luma(80))[{esc(row['details'])}]" if row.get("details") else ""
+        inst = ", ".join(row["occurrences"][:6]) + (f", … ({len(row['occurrences'])} total)" if len(row["occurrences"]) > 6 else "")
         w(f"  [#badge({row['label']})], [#image(\"images/{row['thumbnail']}\", width: 28mm)],")
-        w(f"  [*{esc(row['name'])}* \\ #text(size: 9pt)[{esc(row['dimensions'])}]{desc} \\ #text(size: 8pt, fill: luma(80))[id `{esc(row['part_id'])}`, installed as {esc(', '.join(row['occurrences']))}]],")
+        w(f"  [*{esc(row['name'])}* \\ #text(size: 9pt)[{esc(row['dimensions'])}]{details}{desc} \\ #text(size: 7.5pt, fill: luma(80))[id `{esc(row['part_id'])}`, installed as {esc(inst)}]],")
         w(f"  [#text(size: 16pt, weight: \"bold\")[{row['required']}] \\ #text(size: 7.5pt)[required {row['required']} {esc(row['unit'])}]], [#{found}],")
     w(")")
     w("")
@@ -61,6 +63,8 @@ def render(model):
     w("== Finished assembly")
     w(f"#figure(image(\"images/{model['overview_image']}\", width: 100%), caption: [All parts installed.])")
     # steps
+    if not model["steps"]:
+        w(""); w("== Steps"); w("No assembly sequence has been authored for this scene."); w("")
     for s in model["steps"]:
         w("#pagebreak()")
         w(f"== Step {s['index']}")
@@ -91,7 +95,7 @@ def render(model):
     w("== Build record")
     r = model["receipt"]
     w("#set text(size: 8pt)")
-    w("#table(columns: (auto, 1fr), stroke: 0.4pt + luma(160), align: left + horizon,")
+    w("#table(columns: (34%, 1fr), stroke: 0.4pt + luma(160), align: left + horizon,")
     for k, v in r["input_hashes"].items():
         w(f"  [{esc(k)}], [`{v}`],")
     if r.get("meshes"):
@@ -104,7 +108,8 @@ def render(model):
         w(f"  [render warning], [{esc(wmsg)}],")
     for k, v in r["render_views"].items():
         w(f"  [image {esc(k)}], [`{v}`],")
-    w(f"  [generator], [{esc(json.dumps(r['generator']))}],")
+    gen = r["generator"]
+    w(f"  [generator], [{esc('; '.join(f'{k} {v}' for k, v in gen.items()))}],")
     w(")")
     w(f"Review state {esc(model['review_state'])}; physical assembly not validated.")
     return "\n".join(L) + "\n"

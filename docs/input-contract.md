@@ -98,6 +98,46 @@ everything else with one combined error listing every problem. Accepted:
 | instructions | `schema_version`, `scene`, `id`, `title`, `review_state` (draft, cad-reviewed, physically-validated), `views[]` (`id`, `projection`, `eye`, `target`, `up`), `steps[]` (`id`, `requires`, `add`, `view`, `caption`, `approach{occurrence_id, start_offset, end_offset, validation}`) |
 | inventory | `schema_version`, `scene`, `status`, `items[]` (`part_id`, `required`, `unit`, `counted`) |
 
+### Production fields (accepted since 2026-10-21, after the first Windows per-part export)
+
+The Windows adapter's `part-assets/scene.json` (37 parts, 16 groups, 155
+occurrences) added provenance and native-structure fields. They are accepted as
+optional fields and validated; none of them changes geometry or quantities:
+
+| Where | Field | Rule |
+| --- | --- | --- |
+| `coordinate_system` | `up_axis: "+Y"` with `basis_to_z_up` | A +Y-up native scene must declare the rigid matrix taking native coordinates to the +Z-up scene frame; it must map +Y to +Z with no translation. It is applied **once, at the root**; every resolved world transform, camera and approach offset is then in the +Z-up frame. Instruction views are authored in that frame. `note` is free text. |
+| `source` | any scalar-valued keys | Provenance (Vault ids, exporter, scope note) is carried as data; nested structures are rejected. |
+| `parts[]` | `model_state`, `bodies{surface_bodies, solid_bodies, visible_solid_bodies}`, `volume_mm3`, `bom_structure_default`, `properties{…}`, `source{…}` | Scalars only inside `properties`/`source`; `identifying_dimensions_mm.extent` may be a three-number box. When `extent` or `volume_mm3` is present the CAD stage compares it with the imported geometry. |
+| `assemblies[]` | `document`, `bom_structure`, `model_state`, `suppressed`, `visible`, `flexible` | `suppressed: true` is rejected (omit the group or extend the contract). |
+| `occurrences[]` | `transform_world`, `position_overridden_vs_definition`, `parent_flexible`, `visible`, `visible_effective`, `suppressed`, `grounded`, `mirrored`, `bom_structure`, `model_state` | `transform_world` (native frame) must equal the composed parent chain (checked, 1e-6 relative). `suppressed: true` and `mirrored: true` are rejected. `bom_structure: "Reference"` marks reference-only geometry: rendered for context, never installed, excluded from `required`. |
+
+Identifiers are any non-empty strings without control characters or surrounding
+whitespace (Vault paths, `name|[ModelState]` keys and `A:1/B:2` occurrence paths
+are fine); file names derive from them through `names.slug`. A UTF-8 byte-order
+mark at the start of a manifest is tolerated. `instructions.json` is optional:
+without it the pipeline produces the parts inventory and overview only, and the
+outputs say so. `python3 -m mechanical_docs inventory-template PROJECT` writes a
+draft inventory whose `required` equals the installed occurrences per part;
+that is an installed quantity, not a purchase list or stock.
+
+Flexible subassemblies: one group definition with per-instance child placements
+is what the contract expects. Each flexible instance is already a distinct
+group id (`CAMERA FRAME:1`), its children carry the instance transforms, and
+`parent_flexible`/`position_overridden_vs_definition` record that they differ
+from the definition. No separate group ids per flexible instance are needed.
+
+Per-asset units: accepted and preferred over re-export. FreeCAD imports every
+STEP as millimetres whatever the file declares, so the CAD stage reads the
+file's own unit from the `LENGTH_UNIT` referenced by
+`GLOBAL_UNIT_ASSIGNED_CONTEXT` (`stepinfo.py`), requires it to equal the
+manifest's asset unit, and records bounds in millimetres with the factor to
+metres; a manifest `extent` must then match the imported extent within the
+larger of 2 mm and 1 % (Inventor's range boxes are conservative on curved
+faces; the enclosure's 37 parts deviate by at most 1.445 mm). The declared
+unit is provenance and a consistency check only; it is never applied to the
+kernel's coordinates (a 47-inch panel reads back as 1193.8 mm and stays so).
+
 Rejected, each with a message naming the field: unknown fields, a wrong schema
 version, an absolute or root-escaping asset path, a missing file, a SHA-256
 mismatch, duplicate ids (assemblies and occurrences share one namespace),
@@ -108,30 +148,35 @@ step, an occurrence installed twice or never, an assembly group listed as an
 installed part, an approach hint for an occurrence the step does not add, a
 non-zero `end_offset`, a `validation` other than `unverified-render-hint`,
 an inventory `required` that differs from the installed occurrence count, and
-a part without an inventory row. Identifiers match `[A-Za-z0-9][A-Za-z0-9._-]*`.
+a part without an inventory row, a suppressed or mirrored occurrence, a declared
+world matrix that disagrees with the hierarchy, and an installed-occurrence count
+that includes reference-only geometry.
 
-Unit handling: asset bounds and meshes are in the asset's declared units; the
-scene's transforms, camera coordinates and approach offsets are in the scene's
-units. Each is converted to metres with its own factor exactly once
-(`geometry.py`), and the render stage checks the imported mesh bounds against
-the CAD stage's record so a double or missing conversion fails loudly. The
-`examples/two-bases-fixture` scene (centimetres, millimetre assets, a station
-rotated 90°) exercises this.
+Unit handling: each asset declares its own unit, which the CAD stage verifies
+against the STEP file and normalises to millimetres; the scene's transforms,
+camera coordinates and approach offsets are in the scene's units. Each is
+converted to metres with its own factor exactly once (`geometry.py`), and the
+render stage checks the imported mesh bounds against the CAD stage's record so
+a double or missing conversion fails loudly. The `examples/two-bases-fixture`
+scene (centimetres, millimetre assets, a station rotated 90°) and the enclosure
+snapshot (inch, mm and cm assets, +Y-up native frame) exercise this.
 
 ### Illustration settings (`render.json`, optional)
 
 Per project, beside the manifests. Only appearance: `looks` (part id → palette
 name), `palette` additions, `engine`, `samples`, image sizes, `aspect`, `fill`,
-outline and arrow styling. Unknown fields and unknown look names are rejected.
-It cannot change geometry, identity, quantities or order.
+outline and arrow styling, and the line-art budget (`lines.max_triangles`,
+above which a view is drawn without Freestyle and the receipt says so). Unknown
+fields and unknown look names are rejected. It cannot change geometry,
+identity, quantities or order.
 
 ### Stage outputs
 
 | File | Written by | Content |
 | --- | --- | --- |
 | `inspect.json` | `python3 -m mechanical_docs inspect` | validated parts, occurrences with world transforms, steps with cumulative state, inventory reconciliation, input hashes |
-| `meshes/<part>.glb`, `meshes/meshes.json` | `cad_mesh.py` (FreeCADCmd) | one GLB per part (metres, +Y up, conversion recorded in the asset extras), STEP validity/bounds/volume, mesh winding and volume checks, hashes |
-| `renders/*.png`, `renders/hotspots/*.json`, `renders/render-receipt.json` | `render.py` (Blender) | thumbnails, overview, step and result images; projected occurrence boxes; versions, engine, denoiser, settings hash, per-view hashes, mesh-bounds and pose-restoration checks |
+| `meshes/<part>.glb`, `meshes/meshes.json` | `cad_mesh.py` (FreeCADCmd) | one GLB per part (metres, +Y up, conversion recorded in the asset extras), declared STEP unit versus manifest unit, STEP validity/bounds/volume, mesh winding and volume checks, tessellation attempts under the per-part triangle budget, hashes |
+| `renders/*.png`, `renders/hotspots/*.json`, `renders/render-receipt.json` | `render.py` (Blender) | thumbnails, overview, step and result images; projected occurrence boxes; versions, engine, denoiser, settings hash, per-view hashes, visible triangles and whether line art was drawn, mesh-bounds and pose-restoration checks |
 | `manual/manual.json`, `index.html`, `manual.typ`, `<id>.pdf`, `build-receipt.json` | `python3 -m mechanical_docs manual` | the single document model and both outputs generated from it |
 | `manual/check-report.json`, `manual/checks/` | `python3 -m mechanical_docs check` | HTML/PDF/manual.json agreement, link and image resolution, page rasters and greyscale copies |
 
@@ -139,6 +184,11 @@ Each stage refuses inputs whose hashes differ from the receipt it consumes, and
 refuses receipts that report failed checks or partial renders.
 
 ## Exporter fields requested from the Windows adapter
+
+Status 2026-10-21: items 1 to 5 below are met by `Export-PartAssets.ps1`'s
+output except a refresh-stable occurrence key (ids are snapshot-scoped paths,
+declared as such in `source.occurrence_id_scope`); the raw inventory file
+(`inventory-raw.json`) serialised as a PowerShell type name and is not used.
 
 The Windows pilot's `placement-report.json` already carries occurrence names,
 document paths and hashes, grounded/suppressed/visible flags and row-major 4×4

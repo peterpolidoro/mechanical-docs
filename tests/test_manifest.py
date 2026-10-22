@@ -165,8 +165,115 @@ def test_instructions_must_reference_loaded_scene(project_copy):
 
 def test_all_problems_reported_together(project_copy):
     def f(d):
-        d["parts"][0]["id"] = "bad id!"
+        d["parts"][0]["id"] = "bad\nid"
         d["occurrences"][0]["transform"][3][3] = 2
     project_copy.edit("scene.json", f)
     p = _problems(project_copy)
-    assert "identifier must match" in p and "last row" in p
+    assert "identifier must be a non-empty string" in p and "last row" in p
+
+
+# ---------------------------------------------------------------- production fields
+
+import json as _json
+
+
+def _production_scene(project_copy):
+    """The fixture scene rewritten the way the Windows exporter writes one: Y up with a declared
+    basis, Vault-style ids, provenance and BOM fields, a declared world matrix per occurrence."""
+    def f(d):
+        d["coordinate_system"] = {"handedness": "right", "up_axis": "+Y", "origin": "native origin",
+                                  "note": "native Inventor frame", "basis_to_z_up": [[1, 0, 0, 0], [0, 0, -1, 0], [0, 1, 0, 0], [0, 0, 0, 1]]}
+        d["source"] = {"kind": "autodesk-inventor-vault-snapshot", "vault_id": "28", "root_version_id": None, "occurrence_id_scope": "snapshot paths"}
+        for part in d["parts"]:
+            part["id"] = "DATA\\COMMON\\" + part["id"] + ".ipt|[Primary]"
+            part.update({"model_state": "[Primary]", "bodies": {"surface_bodies": 1, "solid_bodies": 1, "visible_solid_bodies": 1},
+                         "volume_mm3": 1.0, "bom_structure_default": "Normal",
+                         "properties": {"part_number": "", "material": "Zinc", "vendor": None},
+                         "source": {"vault_id": "28", "version_id": "953899", "native_sha256": "ab" * 32}})
+            part["identifying_dimensions_mm"] = {"extent": [10, 10, 30]}
+        d["assemblies"][1].update({"document": "C:\\x\\pin-pair.iam", "bom_structure": "Normal", "model_state": "[Primary]", "suppressed": False, "visible": True, "flexible": True})
+        for o in d["occurrences"]:
+            o["part_id"] = "DATA\\COMMON\\" + o["part_id"] + ".ipt|[Primary]"
+            o["id"] = ("pin-pair:1/" if o["parent_id"] == "pin-pair" else "") + o["id"].upper() + ":1"
+            o.update({"position_overridden_vs_definition": False, "parent_flexible": o["parent_id"] == "pin-pair", "visible": True,
+                      "visible_effective": True, "suppressed": False, "grounded": False, "mirrored": False, "bom_structure": "Normal", "model_state": "[Primary]"})
+        # native-frame world matrices: parent translation (10,0,0) + child
+        for o in d["occurrences"]:
+            tx = o["transform"][0][3] + (10 if o["parent_id"] == "pin-pair" else 0)
+            o["transform_world"] = [[1, 0, 0, tx], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+    project_copy.edit("scene.json", f)
+    (project_copy.dir / "instructions.json").unlink()
+    inv = _json.loads((project_copy.dir / "inventory.json").read_text())
+    for row in inv["items"]:
+        row["part_id"] = "DATA\\COMMON\\" + row["part_id"] + ".ipt|[Primary]"
+    (project_copy.dir / "inventory.json").write_text(_json.dumps(inv))
+
+
+def test_production_style_scene_loads_without_instructions(project_copy):
+    _production_scene(project_copy)
+    pr = load_project(project_copy.dir)
+    assert pr.instructions is None and not pr.has_instructions
+    sc = pr.scene
+    assert sc.native_up_axis == "+Y"
+    pin_a = sc.occurrences["pin-pair:1/PIN-A:1"]
+    # native (x, y, z) -> z-up (x, -z, y): the pin's native translation (-25, 0, 0) stays on X
+    assert T.translation(pin_a.world) == pytest.approx([-25, 0, 0])
+    # a native +Y offset becomes +Z after the basis
+    assert T.apply(sc.basis_to_z_up, [0, 5, 0]) == pytest.approx([0, 0, 5])
+    assert sc.transform_world_check == {"checked": 3, "max_deviation": pytest.approx(0)}
+    part = sc.parts["DATA\\COMMON\\pin.ipt|[Primary]"]
+    assert part.model_state == "[Primary]" and part.properties["material"] == "Zinc" and part.identifying_dimensions_mm["extent"] == [10, 10, 30]
+    assert sc.assemblies["pin-pair"].flexible is True and pin_a.parent_flexible is True
+    assert "instructions.json" not in pr.input_hashes()
+
+
+def test_y_up_requires_a_correct_basis(project_copy):
+    project_copy.edit("scene.json", lambda d: d["coordinate_system"].__setitem__("up_axis", "+Y"))
+    assert "requires 'basis_to_z_up'" in _problems(project_copy)
+    project_copy.edit("scene.json", lambda d: d["coordinate_system"].__setitem__("basis_to_z_up", T.IDENTITY))
+    assert "must map native +Y to +Z" in _problems(project_copy)
+
+
+def test_declared_world_matrix_must_match_hierarchy(project_copy):
+    project_copy.edit("scene.json", lambda d: d["occurrences"][1].__setitem__("transform_world", T.translate(-24, 0, 0)))
+    assert "transform_world: differs from the composed parent chain" in _problems(project_copy)
+
+
+def test_suppressed_and_mirrored_flags_rejected(project_copy):
+    def f(d):
+        d["occurrences"][1]["suppressed"] = True
+        d["occurrences"][2]["mirrored"] = True
+        d["assemblies"][1]["suppressed"] = True
+    project_copy.edit("scene.json", f)
+    p = _problems(project_copy)
+    assert "suppressed occurrences are not accepted" in p and "mirrored occurrences must be exported" in p and "suppressed assemblies are not accepted" in p
+
+
+def test_reference_geometry_is_not_installed(project_copy):
+    project_copy.edit("scene.json", lambda d: d["occurrences"][2].__setitem__("bom_structure", "Reference"))
+    p = _problems(project_copy)
+    assert "required 2 for 'pin' but the scene installs 1" in p and "reference-only occurrences do not count" in p
+    assert "'pin-b' is reference-only geometry" in p
+    project_copy.edit("inventory.json", lambda d: d["items"][1].__setitem__("required", 1))
+    (project_copy.dir / "instructions.json").unlink()
+    pr = load_project(project_copy.dir)
+    assert [o.id for o in pr.scene.installed_occurrences_of("pin")] == ["pin-a"]
+
+
+def test_nested_source_values_rejected(project_copy):
+    project_copy.edit("scene.json", lambda d: d["parts"][0].__setitem__("properties", {"x": {"nested": 1}}))
+    assert "nested data is not accepted" in _problems(project_copy)
+
+
+def test_inventory_template(fixture_dir):
+    from mechanical_docs.manifest import inventory_template, load_scene
+    sc = load_scene(fixture_dir / "scene.json")
+    t = inventory_template(sc)
+    assert t["items"] == [{"part_id": "base", "required": 1, "unit": "each", "counted": None}, {"part_id": "pin", "required": 2, "unit": "each", "counted": None}]
+    assert "not a purchase list" in t["status"]
+
+
+def test_require_instructions_flag(project_copy):
+    (project_copy.dir / "instructions.json").unlink()
+    with pytest.raises(ManifestError, match="instructions: file not found"):
+        load_project(project_copy.dir, require_instructions=True)

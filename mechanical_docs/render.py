@@ -1,6 +1,6 @@
 """Render stage, run inside Blender: part thumbnails, an overview and one or two images per step.
 
-    blender -b --python mechanical_docs/render.py -- PROJECT_DIR MESHES_JSON OUT_DIR [--preview] [--views a,b] [--engine E]
+    blender -b --python mechanical_docs/render.py -- PROJECT_DIR MESHES_JSON OUT_DIR [--preview] [--views a,b] [--engine E] [--no-lines]
 
 Reads the validated project (manifest.py), the CAD stage's meshes.json and the
 project's optional render.json (illustration settings: looks, sizes). Imports
@@ -45,6 +45,7 @@ sys.path.insert(0, str(HERE.parent))
 from mechanical_docs import geometry, receipts  # noqa: E402
 from mechanical_docs import transforms as T  # noqa: E402
 from mechanical_docs.manifest import ManifestError, load_project  # noqa: E402
+from mechanical_docs.names import slug  # noqa: E402
 from mechanical_docs.procedure import approach_pose, derive_states  # noqa: E402
 from mechanical_docs.render_settings import load_settings  # noqa: E402
 
@@ -73,8 +74,10 @@ def aabb_of(points):
 
 
 class Renderer:
-    def __init__(self, project, meshes, settings, out_dir, preview, engine=None):
+    def __init__(self, project, meshes, settings, out_dir, preview, engine=None, lines=True):
         self.project = project
+        self.lines_enabled = lines and settings["lines"]["enabled"]
+        self.last_view = {}
         self.scene = project.scene
         self.meshes = meshes
         self.s = settings
@@ -86,7 +89,7 @@ class Renderer:
         self.warnings = []
         bpy.ops.wm.read_factory_settings(use_empty=True)
         self.scn = bpy.context.scene
-        self.states = derive_states(project.instructions, self.scene)
+        self.states = derive_states(project.instructions, self.scene) if project.instructions is not None else []
         self.import_meshes()
         self.instantiate()
         self.make_materials()
@@ -132,14 +135,14 @@ class Renderer:
             for other in [o for o in bpy.data.objects if o not in before]:
                 bpy.data.objects.remove(other)
             self.mesh_of[pid] = mesh
-            log(f"mesh {pid}: {len(mesh.vertices)} vertices, bounds {[round(v, 4) for v in mn]}..{[round(v, 4) for v in mx]} m, bounds check {'ok' if ok else 'FAILED'}")
+            log(f"mesh {pid}: {len(mesh.vertices)} vertices, {len(mesh.polygons)} triangles, bounds {[round(v, 4) for v in mn]}..{[round(v, 4) for v in mx]} m, bounds check {'ok' if ok else 'FAILED'}")
 
     def instantiate(self):
         """One object per occurrence sharing its part's mesh, at the canonical pose."""
         self.obj_of = {}
         self.canonical = {}
         for occ in self.scene.occurrences.values():
-            o = bpy.data.objects.new(f"occ:{occ.id}", self.mesh_of[occ.part_id])
+            o = bpy.data.objects.new(f"occ:{slug(occ.id)}", self.mesh_of[occ.part_id])
             self.scn.collection.objects.link(o)
             o.matrix_world = to_blender(occ.world, self.factor)
             o["occurrence_id"] = occ.id; o["part_id"] = occ.part_id
@@ -151,9 +154,11 @@ class Renderer:
         # thumbnail objects: one per part at identity, hidden unless rendering its thumbnail
         self.thumb_of = {}
         for pid, mesh in self.mesh_of.items():
-            o = bpy.data.objects.new(f"thumb:{pid}", mesh)
+            o = bpy.data.objects.new(f"thumb:{slug(pid)}", mesh)
             self.scn.collection.objects.link(o)
             o.hide_render = True
+            o.matrix_world = Matrix(self.scene.basis_to_z_up)     # show the part the way up the scene is
+            o["part_id"] = pid
             self.thumb_of[pid] = o
         bpy.context.view_layer.update()
         self.canonical_world = {oid: o.matrix_world.copy() for oid, o in self.obj_of.items()}
@@ -196,7 +201,7 @@ class Renderer:
                 mesh.materials.append(self.part_look(pid))
         for o in self.all_objs:
             o.material_slots[0].link = "OBJECT"
-            o.material_slots[0].material = self.part_look(o["part_id"] if "part_id" in o else o.name.split(":")[1])
+            o.material_slots[0].material = self.part_look(o["part_id"])
         for pid, o in self.thumb_of.items():
             o.material_slots[0].material = self.part_look(pid)
 
@@ -438,11 +443,22 @@ class Renderer:
         self.floor.location = Vector((self.scene_centre.x, self.scene_centre.y, min(p.z for p in pts) - 1e-4))
         bpy.context.view_layer.update()
 
+    def visible_triangles(self):
+        return sum(len(o.data.polygons) for o in bpy.data.objects if o.type == "MESH" and not o.hide_render and o is not self.floor)
+
     def render_to(self, view_id, samples):
         scn = self.scn
         # a line set over an empty collection logs "strokes set empty"; skip it
         for ls in bpy.context.view_layer.freestyle_settings.linesets:
             ls.show_render = bool(ls.collection and ls.collection.objects)
+        # Freestyle's cost grows superlinearly with the visible edge count: over budget, no lines for this view
+        tris = self.visible_triangles()
+        budget = self.s["lines"]["preview_max_triangles" if self.preview else "max_triangles"]
+        lines = self.lines_enabled and tris <= budget
+        if self.lines_enabled and not lines:
+            self.warnings.append(f"{view_id}: {tris} visible triangles exceed lines.max_triangles ({budget}); rendered without line art")
+        scn.render.use_freestyle = lines
+        self.last_view = {"lines": lines, "visible_triangles": tris}
         if self.engine == "CYCLES":
             scn.cycles.samples = samples
         elif self.engine.startswith("BLENDER_EEVEE"):
@@ -467,9 +483,18 @@ class Renderer:
             out["occurrences"].append({"id": oid, "part_id": o["part_id"], "box_px": [round(v, 1) for v in box], "corners_in_frame": inside})
         return out
 
-    def step_camera(self):
-        """The instruction view's camera, with one orthographic scale for the whole procedure."""
-        return self.step_camera_for(self.project.instructions.steps[0].view)
+    def overview_camera(self):
+        """The first step's instruction view when there are instructions; otherwise
+        an automatic orthographic view from `overview_direction`, framing every
+        occurrence."""
+        if self.project.instructions is not None:
+            return self.step_camera_for(self.project.instructions.steps[0].view)
+        self.set_resolution(self.long_side(), self.s["aspect"])
+        pts = self.procedure_points()
+        mn, mx = aabb_of(pts); ctr = (mn + mx) / 2
+        d = Vector(self.s["overview_direction"]).normalized()
+        self.aim(ctr + d * max((mx - mn).length, 1e-3) * 4, ctr, Vector((0, 0, 1)))
+        return self.fit(pts, "orthographic", self.s["fill"])
 
     def step_camera_for(self, view_id):
         v = self.project.instructions.views[view_id]
@@ -489,13 +514,14 @@ class Renderer:
         rec = {"id": view_id, "file": path.name, "sha256": receipts.sha256_file(path), "bytes": path.stat().st_size,
                "floor_shadow_catcher": bool(self.floor is not None and not self.floor.hide_render),
                "width": self.scn.render.resolution_x, "height": self.scn.render.resolution_y, "seconds": round(secs, 1),
+               "lines": self.last_view.get("lines"), "visible_triangles": self.last_view.get("visible_triangles"),
                "camera": {"type": self.cam.data.type, "ortho_scale_m": self.cam.data.ortho_scale if self.cam.data.type == "ORTHO" else None,
                           "location_m": list(self.cam.matrix_world.translation)}}
         rec.update(extra)
         return rec
 
     def render_thumbnail(self, pid):
-        view_id = f"part-{pid}"
+        view_id = f"part-{slug(pid)}"
         self.restore()
         for o in self.obj_of.values():
             o.hide_render = True
@@ -516,7 +542,7 @@ class Renderer:
     def render_overview(self):
         view_id = "overview"
         self.restore()
-        framed = self.step_camera()
+        framed = self.overview_camera()
         for o in self.obj_of.values():
             self.coll_subject.objects.link(o)
         self.place_floor(list(self.obj_of.values()), "overview")
@@ -529,7 +555,7 @@ class Renderer:
 
     def render_step(self, st, result=False):
         step = st.step
-        view_id = f"step-{st.index:02d}-{step.id}" + ("-result" if result else "")
+        view_id = f"step-{st.index:02d}-{slug(step.id)}" + ("-result" if result else "")
         self.restore()
         framed = self.step_camera_for(step.view)
         for oid in st.hidden:
@@ -580,12 +606,12 @@ class Renderer:
         views = []
         plan = []
         for pid in self.scene.parts:
-            plan.append((f"part-{pid}", lambda pid=pid: self.render_thumbnail(pid)))
+            plan.append((f"part-{slug(pid)}", lambda pid=pid: self.render_thumbnail(pid)))
         plan.append(("overview", self.render_overview))
         for st in self.states:
-            plan.append((f"step-{st.index:02d}-{st.step.id}", lambda st=st: self.render_step(st)))
+            plan.append((f"step-{st.index:02d}-{slug(st.step.id)}", lambda st=st: self.render_step(st)))
             if st.step.approach is not None:
-                plan.append((f"step-{st.index:02d}-{st.step.id}-result", lambda st=st: self.render_step(st, result=True)))
+                plan.append((f"step-{st.index:02d}-{slug(st.step.id)}-result", lambda st=st: self.render_step(st, result=True)))
         for view_id, fn in plan:
             if only and view_id not in only:
                 continue
@@ -601,10 +627,12 @@ def main(argv):
     if len(argv) < 3:
         raise SystemExit(__doc__)
     project_dir, meshes_path, out_dir = Path(argv[0]), Path(argv[1]), Path(argv[2])
-    preview = False; only = None; engine = None; i = 3
+    preview = False; only = None; engine = None; lines = True; i = 3
     while i < len(argv):
         if argv[i] == "--preview":
             preview = True; i += 1
+        elif argv[i] == "--no-lines":
+            lines = False; i += 1
         elif argv[i] == "--views":
             only = argv[i + 1].split(","); i += 2
         elif argv[i] == "--engine":
@@ -627,18 +655,20 @@ def main(argv):
         raise SystemExit(f"{meshes_path}: the CAD stage reported problems; not rendering unchecked geometry")
     settings, settings_path = load_settings(project.dir)
     t0 = time.time()
-    r = Renderer(project, meshes, settings, out_dir, preview, engine)
+    r = Renderer(project, meshes, settings, out_dir, preview, engine, lines)
     views = r.run(only)
     receipt = {
         "kind": "mechanical-docs-render-receipt", "generated_at_utc": receipts.utc_now(),
         "blender": bpy.app.version_string, "python": sys.version.split()[0], "engine": r.engine, "denoiser": r.denoiser,
         "preview": preview, "samples": r.samples(), "long_side_px": r.long_side(), "floor_shadow_catcher": r.floor is not None,
+        "lines": r.lines_enabled, "lines_max_triangles": settings["lines"]["preview_max_triangles" if preview else "max_triangles"],
         "settings_file": str(settings_path.relative_to(project.dir)) if settings_path else None,
         "settings_sha256": receipts.sha256_text(json.dumps(settings, sort_keys=True)),
         "project_dir": str(project.dir), "scene_id": project.scene.id, "scene_units": project.scene.units, "unit_factor_to_m": r.factor,
+        "native_up_axis": project.scene.native_up_axis, "occurrences": len(project.scene.occurrences), "parts": len(project.scene.parts),
         "input_hashes": project.input_hashes(), "meshes_json_sha256": receipts.sha256_file(meshes_path),
         "mesh_hashes": {pid: rec["mesh"]["sha256"] for pid, rec in meshes["parts"].items()},
-        "partial": only is not None, "views": views,
+        "partial": only is not None, "inventory_only": project.instructions is None, "views": views,
         "checks": r.checks, "warnings": r.warnings,
         "all_checks_passed": not r.checks["problems"] and all(c["passed"] for c in r.checks["mesh_bounds_match"]) and all(c["passed"] for c in r.checks["restoration"]),
         "not_checked": ["image legibility (inspect the PNGs)", "insertion path or tool access", "physical assembly"],

@@ -1,8 +1,9 @@
 """Pure geometry helpers shared by the render stage and its tests.
 
-Mesh bounds in meshes.json are in the *asset's* units (the STEP file's), while
-occurrence transforms are in the *scene's* units. Each is converted to metres
-with its own factor, exactly once, before they are combined.
+Mesh bounds in meshes.json are in the CAD stage's units (millimetres, with the
+factor to metres recorded beside them), while occurrence transforms are in the
+*scene's* units. Each is converted to metres with its own factor, exactly once,
+before they are combined.
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ def mesh_bounds_m(mesh_record):
 
 def occurrence_corners_m(mesh_record, world, scene_units):
     """The eight bounding-box corners of a part placed by `world` (a scene-unit
-    transform), in metres: asset-unit corners scaled by the asset factor, then
+    transform), in metres: mesh-unit corners scaled by the recorded factor, then
     transformed by the pose with its translation scaled by the scene factor."""
     mn, mx = mesh_bounds_m(mesh_record)
     M = T.scaled_translation(world, T.unit_factor(scene_units, "m"))

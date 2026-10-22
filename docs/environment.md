@@ -65,6 +65,24 @@ thumbnails and the overview only (`floor.views` in `render.json`). EEVEE Next
 takes under a second per view and is used for previews; its images have no
 contact shadows. Headless rendering works with or without `DISPLAY`.
 
+Line art is the expensive part on production geometry, not path tracing.
+Freestyle builds a view map over every visible edge and its cost grows
+superlinearly with edge count: the first enclosure overview (155 occurrences,
+5.2 million triangles at 0.05 mm deflection, threaded hardware included) took
+93 minutes for one 1600 px image while a 320-vertex panel thumbnail took 10 s
+and a 132 000-triangle corner cube 123 s. Two budgets keep this bounded:
+`cad_mesh.py --max-triangles` (default 50 000 per part) re-meshes a part from a
+freshly read shape with the deflections coarsened by 1.6 per attempt until it
+fits, recording every attempt in `meshes.json`; and `lines.max_triangles` in
+the render settings (default 3 million visible triangles, 400 000 for
+previews) renders a view without Freestyle when the visible geometry exceeds
+it, with a warning in the receipt and `lines: false` on the view record.
+`--no-lines` turns Freestyle off for a whole run. Measured after the budgets
+on the same enclosure (2.44 million triangles, 37 parts, 155 occurrences): CAD
+stage 2 min 22 s, thumbnails 9.5 to 23 s each, overview 51 s without lines and
+32 min with them. Grease Pencil Line Art is the candidate replacement if that
+is still too slow for step views; it has not been tried in background mode here.
+
 ## Typst and Poppler
 
 Typst compiles the generated `manual.typ` with its bundled fonts (no network).

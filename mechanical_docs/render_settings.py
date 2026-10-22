@@ -50,6 +50,7 @@ DEFAULTS = {
     "fill": 0.86,
     "thumbnail_fill": 0.78,
     "thumbnail_direction": [1.0, -1.2, 0.9],
+    "overview_direction": [1.0, -1.2, 0.8],   # used when a project has no instructions (inventory only)
     "film_transparent": True,
     "view_transform": "Standard",
     "look": "None",
@@ -64,6 +65,11 @@ DEFAULTS = {
     "looks": {},
     "context_color": [0.80, 0.81, 0.83],
     "lines": {
+        "enabled": True,
+        # Freestyle's view map grows superlinearly with edge count; above this many visible
+        # triangles a view is rendered without line art and the receipt says so
+        "max_triangles": 3000000,
+        "preview_max_triangles": 400000,
         "crease_angle_deg": 110,
         "subject": {"color": [0.06, 0.06, 0.08], "thickness": 2.6},
         "context": {"color": [0.42, 0.43, 0.46], "thickness": 0.9},
@@ -75,7 +81,7 @@ DEFAULTS = {
 
 # render.json may set these top-level keys; palette entries may be added, not the whole palette replaced.
 OVERRIDABLE = {"engine", "samples", "preview_samples", "cycles_samples", "cycles_preview_samples", "cycles_adaptive_threshold", "cycles_max_bounces", "cycles_persistent_data", "floor", "long_side_px", "preview_long_side_px", "thumbnail_px", "aspect", "fill",
-               "thumbnail_fill", "thumbnail_direction", "film_transparent", "view_transform", "look", "exposure", "world", "studio",
+               "thumbnail_fill", "thumbnail_direction", "overview_direction", "film_transparent", "view_transform", "look", "exposure", "world", "studio",
                "default_look", "looks", "context_color", "lines", "arrow", "palette", "note", "schema_version"}
 
 

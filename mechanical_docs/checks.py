@@ -79,8 +79,11 @@ def run(args):
     totals = {}
     for _, pid, q in ref_needed:
         totals[pid] = totals.get(pid, 0) + q
-    check("manual.json: parts needed over all steps equal required quantities",
-          "passed" if totals == {p: r for p, r, _ in ref_inv} else "failed", {"needed": totals, "required": {p: r for p, r, _ in ref_inv}})
+    if ref_steps:
+        check("manual.json: parts needed over all steps equal required quantities",
+              "passed" if totals == {p: r for p, r, _ in ref_inv} else "failed", {"needed": totals, "required": {p: r for p, r, _ in ref_inv}})
+    else:
+        check("manual.json: parts needed over all steps equal required quantities", "not-run", "no steps: inventory-only document")
     check("manual.json: step indices are 1..N in order", "passed" if [i for _, i in ref_steps] == list(range(1, len(ref_steps) + 1)) else "failed")
 
     # HTML
@@ -125,7 +128,7 @@ def run(args):
             pages = int(re.search(r"Pages:\s+(\d+)", info).group(1))
             report["pdf_pages"] = pages
             # one page per step after the front matter, so each step has a usable page break
-            check("PDF has at least one page per step plus front matter", "passed" if pages >= len(ref_steps) + 2 else "failed", f"{pages} pages for {len(ref_steps)} steps")
+            check("PDF has at least one page per step plus front matter", "passed" if pages >= len(ref_steps) + (2 if ref_steps else 1) else "failed", f"{pages} pages for {len(ref_steps)} steps")
         if pdfimages:
             imgs = run_cmd([pdfimages, "-list", str(pdf)]).stdout.strip().splitlines()
             n_imgs = max(0, len(imgs) - 2)
@@ -139,7 +142,9 @@ def run(args):
         else:
             check("PDF pages rasterised for inspection", "not-run", "pdftoppm not on PATH")
     convert = shutil.which("magick") or shutil.which("convert")
-    if convert:
+    if not model["steps"]:
+        check("greyscale step images written for monochrome inspection", "not-run", "no steps: inventory-only document")
+    elif convert:
         checks_dir = out / "checks"; checks_dir.mkdir(exist_ok=True)
         made = []
         for s in model["steps"]:

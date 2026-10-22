@@ -5,7 +5,7 @@ and structured project information. The first use case is a visual parts invento
 and LEGO-style assembly manual, with matching web and printable PDF versions.
 Future uses include maintenance, replacement, disassembly and inspection guides.
 
-**Status: first working slice on synthetic fixtures (2026-10-21).** A validated
+**Status: first working slice on synthetic fixtures; first production snapshot loads (2026-10-21).** A validated
 draft-1 manifest loader, a FreeCAD STEP-to-mesh stage, a Blender render stage
 (Cycles with OpenImageDenoise through the `bpy` wheel, EEVEE on the Guix Blender),
 and a document stage that writes one `manual.json` and generates HTML and a Typst
@@ -45,9 +45,10 @@ The Pixi route needs `pixi install -e render` once (and, inside a Guix shell,
 Or stage by stage, each in its Guix role (see [docs/environment.md](docs/environment.md)):
 
 ```sh
+python3 -m mechanical_docs inventory-template PROJECT      # draft inventory.json from a scene (required = installed occurrences)
 python3 -m mechanical_docs inspect examples/three-part-fixture --json build/inspect.json
-FreeCADCmd mechanical_docs/cad_mesh.py --pass examples/three-part-fixture build/meshes
-pixi run -e render render examples/three-part-fixture build/meshes/meshes.json build/renders [--preview] [--engine BLENDER_EEVEE_NEXT]
+FreeCADCmd mechanical_docs/cad_mesh.py --pass examples/three-part-fixture build/meshes [--max-triangles 50000]
+pixi run -e render render examples/three-part-fixture build/meshes/meshes.json build/renders [--preview] [--engine BLENDER_EEVEE_NEXT] [--no-lines]
 blender -b --python mechanical_docs/render.py -- examples/three-part-fixture build/meshes/meshes.json build/renders --engine BLENDER_EEVEE_NEXT
 python3 -m mechanical_docs manual examples/three-part-fixture --renders build/renders --out build/manual --meshes build/meshes/meshes.json
 python3 -m mechanical_docs check build/manual
@@ -56,6 +57,13 @@ python3 -m mechanical_docs check build/manual
 Every stage writes a receipt with input hashes and tool versions and refuses
 inputs whose hashes do not match the receipt it consumes. `build/` is ignored
 by Git; representative outputs go to the shared evidence area.
+
+A project without `instructions.json` still builds: the output is the parts
+inventory and the overview, and both documents say that no assembly sequence
+has been authored. That is how a CAD snapshot is processed before anyone has
+reviewed an order. The loader also accepts the production fields the Windows
+exporter writes (per-asset inch/mm/cm units, a declared +Y-up basis, Vault
+provenance, BOM structure, flexible-instance flags); see the contract.
 
 ## What the manual contains
 

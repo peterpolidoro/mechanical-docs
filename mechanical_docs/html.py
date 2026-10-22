@@ -85,9 +85,16 @@ def callouts_svg(model, out_dir):
     label_of = {row["part_id"]: row["label"] for row in model["inventory"]}
     r = max(16, round(min(W, H_) * 0.022))
     out = [f'<svg class="callouts web-only" viewBox="0 0 {W} {H_}" aria-label="Clickable part callouts (web only)">']
+    # one callout per part (its largest projected occurrence) keeps a 155-occurrence scene legible
+    best = {}
     for e in hs["occurrences"]:
         if e["corners_in_frame"] < 4:
             continue
+        x0, y0, x1, y1 = e["box_px"]
+        area = (x1 - x0) * (y1 - y0)
+        if e["part_id"] not in best or area > best[e["part_id"]][0]:
+            best[e["part_id"]] = (area, e)
+    for _, e in sorted(best.values(), key=lambda t: (t[1]["box_px"][1], t[1]["box_px"][0])):
         x0, y0, x1, y1 = e["box_px"]
         n = label_of.get(e["part_id"], "?")
         out.append(f'<a href="#part-{H.escape(e["part_id"])}"><title>{H.escape(e["id"])}: part {n}</title>'
@@ -120,7 +127,11 @@ def render(model, out_dir, embed_images=False):
         o.append(f'<tr id="part-{e(row["part_id"])}" data-part="{e(row["part_id"])}" data-required="{row["required"]}" data-label="{row["label"]}">')
         o.append(f'<td class="num"><span class="label">{row["label"]}</span></td>')
         o.append(f'<td><img src="{src(row["thumbnail"])}" alt="{e(row["name"])}" width="120" height="120"></td>')
-        o.append(f'<td><strong>{e(row["name"])}</strong><br><span class="hint">{e(row["dimensions"])}</span>' + (f'<br><span class="hint">{e(row["description"])}</span>' if row["description"] else "") + f'<br><span class="hint">id <code>{e(row["part_id"])}</code>, installed as {", ".join(e(x) for x in row["occurrences"])}</span></td>')
+        inst = ", ".join(e(x) for x in row["occurrences"][:6]) + (f", … ({len(row['occurrences'])} total)" if len(row["occurrences"]) > 6 else "")
+        o.append(f'<td><strong>{e(row["name"])}</strong><br><span class="hint">{e(row["dimensions"])}</span>'
+                 + (f'<br><span class="hint">{e(row["details"])}</span>' if row.get("details") else "")
+                 + (f'<br><span class="hint">{e(row["description"])}</span>' if row["description"] else "")
+                 + f'<br><span class="hint">id <code>{e(row["part_id"])}</code>, installed as {inst}</span></td>')
         o.append(f'<td class="num">{row["required"]}<div class="hint" style="font-size:.7rem;font-weight:400">{e(row["unit"])}</div></td>')
         o.append(f'<td class="num"><input class="count web-only" type="number" min="0" value="{counted}" aria-label="quantity found for {e(row["name"])}"><span class="count-box print-only">{counted}</span></td></tr>')
     o.append("</tbody></table>")
@@ -133,7 +144,10 @@ def render(model, out_dir, embed_images=False):
     o.append("</div><figcaption>All parts installed. On the web, click a numbered callout to jump to the part.</figcaption></figure>")
 
     # steps
-    o.append('<h2 id="steps">Steps</h2>')
+    if model["steps"]:
+        o.append('<h2 id="steps">Steps</h2>')
+    else:
+        o.append('<h2 id="steps">Steps</h2><p class="hint">No assembly sequence has been authored for this scene.</p>')
     for s in model["steps"]:
         o.append(f'<section class="step" id="step-{s["index"]}" data-step="{e(s["id"])}" data-index="{s["index"]}">')
         o.append(f'<header><div class="step-number">{s["index"]}</div><div class="step-title"><code>{e(s["id"])}</code>' + (f' &middot; after {", ".join(e(r) for r in s["requires"])}' if s["requires"] else "") + "</div></header>")
