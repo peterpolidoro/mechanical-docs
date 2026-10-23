@@ -16,22 +16,29 @@ mailbox and evidence paths; the tracked documentation stays usable without them.
 - `mechanical_docs/`: `manifest.py` (validation, production fields, +Y-up basis,
   the inventory stock record, `supplement.json`), `names.py` (slugs for
   free-form ids), `stepinfo.py` (declared STEP unit), `transforms.py`,
-  `procedure.py`, `gltf.py`, `geometry.py`, `receipts.py`, `reuse.py` (which
-  earlier views are stale under new settings), `render_settings.py`
-  (looks, budgets, long-part thumbnail rules, `inspection_groups`,
-  `joint_views`), `cad_mesh.py` (FreeCADCmd, triangle budget), `render.py`
+  `procedure.py`, `gltf.py` (single-mesh and multi-node GLB writers),
+  `geometry.py`, `receipts.py`, `reuse.py` (which earlier views are stale
+  under new settings), `explode.py` (which top-level groups the exploded
+  view moves and by how much), `render_settings.py` (looks, budgets,
+  long-part thumbnail rules, `inspection_groups`, `joint_views`,
+  `exploded_view`), `cad_mesh.py` (FreeCADCmd, triangle budget), `render.py`
   (Blender, Cycles default, line budget, wide thumbnails and end views for long
   parts, `--groups` subassembly inspection views, `joint_views` close-ups,
-  `--reuse` of earlier views), `document.py` + `html.py` + `typst.py`
-  (picture-led parts cards, supplementary items, subassembly and joint pages
-  with hardware lists, compact build record, `--appendix`), `checks.py`,
+  the exploded view, `--reuse` of earlier views), `viewer.py` (bpy: the two
+  viewer GLBs with decimation and anchors), `document.py` + `html.py` + `typst.py`
+  (front page with the overview and the exploded view with page references,
+  picture-led parts cards, supplementary items, subassembly pages with the
+  definition's instance count and totals, joint pages with hardware lists,
+  compact build record, `viewer/hotspots.json`, the build scope's phase
+  quantities, checklist and step chapters, `--appendix`), `checks.py`,
   `cli.py` (`inspect`, `inventory-template`, `manual`, `check`). `tests/` has
   102 pure-Python tests plus `tests/test_cad_stage.py`, which runs FreeCAD on
   the units fixture when `FreeCADCmd` is on PATH (the CAD role) and is skipped
   otherwise.
 - `examples/three-part-fixture/` (now with `supplement.json`: three synthetic
-  supplementary rows, and a `render.json` with the `pin-pair` inspection view
-  and one `pin_to_base` joint close-up), `examples/two-bases-fixture/` and
+  supplementary rows, a `render.json` with the `pin-pair` inspection view,
+  one `pin_to_base` joint close-up and an exploded-view spread, and a
+  `build-scope.json` deferring pin B), `examples/two-bases-fixture/` and
   `examples/units-fixture/` (a real inch STEP and a centimetre STEP derived from
   the millimetre fixture by rewriting the unit context, in an inch, +Y-up scene
   with a nested group), all building with `tools/build-fixture.sh`.
@@ -64,28 +71,31 @@ owns the project-side configuration.
 
 ## Suggested next work
 
-1. The enclosure now builds with the Linux agent's overlay (`supplement.json`
-   with 20 family rows, 16 `joint_views`, a stock record on every inventory
-   row; evidence runs `2026-10-22-documentation-enclosure-supplement-01` to
-   `-03`). All sixteen joint close-ups show their attachment after two rounds
-   of direction and context adjustments by the Linux agent; a further overlay
-   change needs only `--reuse` on the latest receipt (`reuse.py` re-renders
-   exactly the views whose specification or outline state changed). Do not
-   invent rows or views.
-2. Peter's review of the picture-led inventory, the subassembly pages and the
-   new supplementary section (labels, card size, inch equivalents, whether
-   the supplementary table belongs in the technician PDF as decided).
-3. A reviewed sequence for one small subassembly from the project team (the
-   caster or panel assembly already has an inspection view); then per-step view
-   overrides, `tools` and `checkpoints` per step, moves/removals as declared
-   operations.
+1. The enclosure now builds as the phase-1 draft manual: front page (overview,
+   exploded subassembly view with page references), picture-led cards with
+   this-build/conditional/deferred quantities, the verification checklist,
+   subassembly pages with instance counts, joint close-ups, 18 draft steps
+   (two conditional, one deferred) and the viewer data (`viewer/`) that the
+   Linux agent's `assembly/site_pages.py` turns into the site. Evidence runs
+   `2026-10-23-documentation-manual-fixes-01`, `-front-page-and-viewer-01`,
+   `-phase-1-01`. A corrected `instructions.json` after Peter's physical build
+   re-renders only the steps whose state changed (`--reuse` on the latest
+   receipt); a changed `build-scope.json` needs no render unless a step's
+   additions or installed-before set change. Do not invent rows, views or order.
+2. Peter's review of the front page, the phase-1 cards and checklist, the
+   step pages and the exploded view's default offsets (`exploded_view.groups`
+   overrides in `render.json` if he wants the toggle clamps closer).
+3. Open the viewer GLBs in a browser (model-viewer) once Linux's site build
+   is up; fix normals, scale or anchor placement if anything looks wrong.
 4. Line art on full-assembly views: Freestyle stays off above the budget (the
-   enclosure overview is reused from the 32-minute run). Evaluate Grease Pencil
-   Line Art in background mode before raising it; do not block on it.
-5. No further group instances beyond `:1` for now (Linux, 2026-10-22); add
-   them only when the project team names them.
-6. A MkDocs wrapper page with the static fallback, reusing the atlas and PCB
-   site templates; a joystick atlas view through `render.py` as a regression.
+   overview and the exploded view are without outlines). Evaluate Grease
+   Pencil Line Art in background mode before raising it; do not block on it.
+5. No further group instances beyond `:1` as inspection views for now
+   (Linux, 2026-10-22); the pages already count every instance of a definition.
+6. The site pages are generated by the Linux agent from `manual.json` and
+   `viewer/hotspots.json`; a later move of that generator into this
+   repository is expected, not now. A joystick atlas view through
+   `render.py` as a regression.
 
 ## What remains with the CAD/project agents
 

@@ -22,6 +22,11 @@ def raw(s):
     return '#raw("' + str(s).replace("\\", "\\\\").replace('"', '\\"') + '")'
 
 
+def group_label(g):
+    """The Typst label of a subassembly page (for #link and page lookups)."""
+    return f"group-{g['index']}"
+
+
 def esc(s):
     """Escape Typst markup specials in plain text."""
     out = []
@@ -37,10 +42,12 @@ def esc(s):
 # quantity line sits at the same place on every card (the PDF text check reads
 # the cards in content order); over-long labels and details are clipped on the
 # card and complete in the HTML, manual.json and the appendix.
+IMAGE_WIDTH_MM = 186     # A4 text width at the 12 mm margins: the exploded view is drawn at this width so callouts can be placed in mm
+OVERVIEW_HEIGHT_MM = 120  # the front-page overview shares page 1 with the status block
 CARD_HEIGHT_MM = 84      # three rows per A4 page with the 4 mm gutters
-HEAD_HEIGHT_MM = 12
+HEAD_HEIGHT_MM = 13      # badge plus a two-line 9 pt label with its descenders
 PIC_HEIGHT_MM = 34
-TEXT_HEIGHT_MM = 16      # six 7.5 pt lines: size, details, description, stock record, configuration flag, review note
+TEXT_HEIGHT_MM = 20      # six 7.5 pt lines: size, details, description, stock record, configuration flag, review note
 
 
 def render(model):
@@ -54,6 +61,7 @@ def render(model):
     w("#let countbox = box(width: 16mm, height: 9mm, stroke: 1.2pt + black)")
     w("#let badge(n) = box(width: 7.5mm, height: 7.5mm, radius: 4mm, stroke: 1.5pt + black, align(center + horizon, text(weight: \"bold\", size: 10pt, str(n))))")
     w("#let sbadge(s) = box(height: 6.5mm, radius: 1mm, inset: (x: 1.5mm), stroke: (paint: black, thickness: 1pt, dash: \"dashed\"), align(center + horizon, text(weight: \"bold\", size: 8.5pt, s)))")
+    w("#let cbadge(n) = box(width: 8mm, height: 8mm, radius: 4mm, fill: rgb(\"#d9480f\"), stroke: 1.5pt + white, align(center + horizon, text(weight: \"bold\", size: 10pt, fill: white, str(n))))")
     w(f"= {esc(model['title'])}")
     w(f"Scene {raw(model['scene']['id'])}: {esc(model['scene']['title'])}. Document {raw(model['id'])}. Generated {esc(model['generated_at_utc'])}.")
     w("")
@@ -63,41 +71,61 @@ def render(model):
         w(f"  \\ {esc(line)}")
     w("]")
     w("")
-    # parts cards
+    # front page: the whole assembly, then the subassemblies drawn apart with their page numbers
+    w("== Finished assembly")
+    w(f"#figure(image(\"images/{model['overview_image']}\", width: 100%, height: {OVERVIEW_HEIGHT_MM}mm, fit: \"contain\"), caption: [All parts at their CAD positions.])")
+    w("")
+    ev = model.get("exploded_view")
+    if ev and ev.get("width") and ev.get("height"):
+        w("#pagebreak(weak: true)")
+        w("== Subassemblies, drawn apart")
+        w(f"#text(size: 9pt)[{esc(ev['note'])}. The numbers are the subassembly pages of this document, one callout per subassembly on one of its instances.]")
+        w("")
+        W, Hh = ev["width"], ev["height"]; wmm = IMAGE_WIDTH_MM; hmm = wmm * Hh / W
+        w(f"#box(width: {wmm}mm, height: {hmm:.2f}mm)[")
+        w(f"  #image(\"images/{ev['image']}\", width: {wmm}mm, height: {hmm:.2f}mm, fit: \"contain\")")
+        for c in ev["callouts"]:
+            if c.get("anchor_px"):
+                # the badge is centred on the anchor (a point on the geometry), kept inside the image
+                x = min(max(c["anchor_px"][0] * wmm / W - 4.0, 0.0), wmm - 8.0); y = min(max(c["anchor_px"][1] * hmm / Hh - 4.0, 0.0), hmm - 8.0)
+                w(f"  #place(top + left, dx: {x:.2f}mm, dy: {y:.2f}mm)[#cbadge({c['number']})]")
+        w("]")
+        w("#text(size: 8pt, fill: luma(90))[Illustration offsets only (recorded in manual.json); nothing here is an assembly order.]")
+        w("")
+        w("#table(columns: (11mm, 1fr, 50mm, 20mm), stroke: 0.5pt + luma(140), align: (center + horizon, left + horizon, left + horizon, center + horizon),")
+        w("  table.header([*\\#*], [*Subassembly*], [*Instances*], [*Page*]),")
+        for c in ev["callouts"]:
+            if c["kind"] == "subassembly":
+                ids = ", ".join(raw(x) for x in c["instance_ids"])
+                w(f"  [#cbadge({c['number']})], [*{esc(c['definition'])}* ({c['instance_count']} in this project) \\ #text(size: 7.5pt, fill: luma(90))[callout on {raw(c['callout_instance'])}]],"
+                  f" [#text(size: 7.5pt)[{ids}]], [#context link(<{c['page_ref']}>)[page #query(<{c['page_ref']}>).first().location().page()]],")
+            else:
+                parts = " \\ ".join(f"#badge({p['label']}) {esc(p['label_text'])} ×{p['qty']}" for p in c["parts"])
+                w(f"  [#cbadge({c['number']})], [*Parts directly under the root* \\ {parts}], [#text(size: 7.5pt)[{', '.join(raw(x) for x in c['occurrence_ids'])}]], [see Parts],")
+        w(")")
+        if ev["without_page"]:
+            w(f"#text(size: 8pt, fill: luma(90))[Moved without a page of their own: {', '.join(raw(x) for x in ev['without_page'])}.]")
+        w("")
+    w("#pagebreak(weak: true)")
+    # parts cards: the build's parts, then (with a build scope) the parts deferred entirely
+    scope = model.get("build_scope")
     w("== Parts")
-    w(f"#text(size: 9pt)[{esc(model['cad_qty_note'])} Write the quantity you count in the box.]")
+    w(f"#text(size: 9pt)[{esc(model['cad_qty_note'])}" + (f" The large number is the quantity for {esc(scope['phase'])} (this build); conditional and deferred quantities are stated beside it." if scope else "") + " Write the quantity you count in the box.]")
     w("")
-    w("#grid(columns: (1fr, 1fr, 1fr), column-gutter: 4mm, row-gutter: 4mm,")
-    for row in model["inventory"]:
-        found = "#countbox"
-        w(f"  block(width: 100%, height: {CARD_HEIGHT_MM}mm, stroke: 1pt + black, inset: 4pt, clip: true, breakable: false)[")
-        w(f"    #box(width: 100%, height: {HEAD_HEIGHT_MM}mm, clip: true)[#badge({row['label']}) #h(2pt) #text(weight: \"bold\", size: 9pt)[{esc(row['label_text'])}]]")
-        w("    #v(1pt)")
-        if row.get("end_view"):
-            w(f"    #grid(columns: (2fr, 1fr), column-gutter: 1.5mm, image(\"images/{row['thumbnail']}\", width: 100%, height: {PIC_HEIGHT_MM}mm, fit: \"contain\"), "
-              f"image(\"images/{row['end_view']}\", width: 100%, height: {PIC_HEIGHT_MM}mm, fit: \"contain\"))")
-        else:
-            w(f"    #image(\"images/{row['thumbnail']}\", width: 100%, height: {PIC_HEIGHT_MM}mm, fit: \"contain\")")
-        w("    #v(1pt)")
-        size = esc(row["dimensions"])
-        extra = " \\ " + esc(row["details"]) if row.get("details") else ""
-        extra += " \\ " + esc(row["description"]) if row["description"] else ""
-        if row.get("stock_text"):
-            extra += " \\ " + esc(row["stock_text"])
-        if row.get("intended_configuration_confirmed") is not None:
-            extra += " \\ intended configuration confirmed: " + ("yes" if row["intended_configuration_confirmed"] else "no")
-        if row.get("review_note"):
-            extra += " \\ #text(weight: \"bold\", fill: rgb(\"#b4400a\"))[⚠ " + esc(row["review_note"]) + "]"
-        w(f"    #box(width: 100%, height: {TEXT_HEIGHT_MM}mm, clip: true)[#text(size: 7.5pt, fill: luma(60))[{size}{extra}]]")
-        w("    #v(1fr)")
-        w("    #line(length: 100%, stroke: 0.4pt + luma(150))")
-        w("    #grid(columns: (1fr, auto), align: (left + horizon, right + horizon),")
-        w(f"      [#text(size: 17pt, weight: \"bold\")[{row['required']}] #h(2pt) #text(size: 6.5pt, fill: luma(60))[CAD qty {row['required']} {esc(row['unit'])}]],")
-        w(f"      [{found} #h(1pt) #text(size: 6.5pt, fill: luma(60))[counted]])")
-        w("  ],")
-    w(")")
+    build_rows = [r for r in model["inventory"] if r.get("scope_kind") != "deferred"]
+    deferred_rows = [r for r in model["inventory"] if r.get("scope_kind") == "deferred"]
+    cards(w, model, build_rows)
     w(f"#text(size: 8pt, fill: luma(90))[{esc(model['count_box_note'])}]")
+    if deferred_rows:
+        w("")
+        w("== Deferred (not in this build)")
+        w(f"#text(size: 9pt)[These parts stay in the CAD model and its counts but are not part of {esc(scope['phase'])}: {esc(scope['title'])}.]")
+        w("")
+        cards(w, model, deferred_rows)
     w("")
+    if scope:
+        checklist(w, model, scope)
+
     # supplementary items: existing-design rows; new-design rows only in the appendix
     sup = model["supplement"]
     printed = [r for r in sup["rows"] if not r["appendix_only"]]
@@ -135,19 +163,35 @@ def render(model):
     # subassembly inspection views
     for g in model["groups"]:
         w("#pagebreak(weak: true)")
-        w(f"== Subassembly {g['index']}: {esc(g['short_name'])}")
-        w(f"#text(size: 8pt, fill: luma(90))[{raw(g['id'])}" + (f" under {raw(g['parent_id'])}" if g["parent_id"] else "") + "]")
+        n = g["instance_count"]
+        w(f"== Subassembly {g['index']}: {esc(g['definition'])} ({n} in this project) <{group_label(g)}>")
+        shown = f"shown: {raw(g['id'])}" + (f" under {raw(g['parent_id'])}" if g["parent_id"] else "")
+        others = (" · other instance" + ("s" if len(g["other_instance_ids"]) > 1 else "") + ": " + ", ".join(raw(x) for x in g["other_instance_ids"])) if g["other_instance_ids"] else ""
+        w(f"#text(size: 8pt, fill: luma(90))[{shown}{others} · definition from the exporter's {esc(g['definition_basis'])}" + (f" · {esc(g['content_notes'])}" if g.get("content_notes") else "") + "]")
         w("")
         w(f"#text(size: 9pt)[{esc(g['note'])}.]")
         w("")
-        w(f"#figure(image(\"images/{g['image']}\", width: 100%), caption: [Subassembly {g['index']}: {esc(g['short_name'])}, parts at their CAD positions (inspection view).])")
+        w(f"#figure(image(\"images/{g['image']}\", width: 100%), caption: [Subassembly {g['index']}: {esc(g['definition'])}, instance {raw(g['id'])}, parts at their CAD positions (inspection view).])")
         w("")
-        w("#table(columns: (auto, 22mm, 1fr, 22mm), align: (center + horizon, center + horizon, left + horizon, center + horizon), stroke: 0.5pt + luma(140),")
-        w("  table.header([*\\#*], [*Picture*], [*Part*], [*In this subassembly*]),")
+        if n > 1:
+            last_head = f"[*For all {n}*]" if g["instances_identical"] else "[*Each instance*]"
+            w("#table(columns: (auto, 22mm, 1fr, 22mm, 24mm), align: (center + horizon, center + horizon, left + horizon, center + horizon, center + horizon), stroke: 0.5pt + luma(140),")
+            w(f"  table.header([*\\#*], [*Picture*], [*Part*], [*Per subassembly*], {last_head}),")
+        else:
+            w("#table(columns: (auto, 22mm, 1fr, 22mm), align: (center + horizon, center + horizon, left + horizon, center + horizon), stroke: 0.5pt + luma(140),")
+            w("  table.header([*\\#*], [*Picture*], [*Part*], [*In this subassembly*]),")
         for p in g["parts"]:
-            w(f"  [#badge({p['label']})], [#image(\"images/{p['thumbnail']}\", width: 20mm, height: 14mm, fit: \"contain\")], [{esc(p['label_text'])}], [#text(size: 14pt, weight: \"bold\")[×{p['qty']}]],")
+            cells = f"  [#badge({p['label']})], [#image(\"images/{p['thumbnail']}\", width: 20mm, height: 14mm, fit: \"contain\")], [{esc(p['label_text'])}], [#text(size: 14pt, weight: \"bold\")[×{p['qty']}]],"
+            if n > 1:
+                cells += (f" [#text(size: 14pt, weight: \"bold\")[×{p['total_qty']}]]," if g["instances_identical"]
+                          else f" [#text(size: 9pt)[{esc(' / '.join(str(q) for q in p['per_instance']))}]],")
+            w(cells)
         w(")")
-        w(f"#text(size: 8pt, fill: luma(90))[{len(g['occurrences'])} occurrence(s); ids in manual.json" + (" and the appendix" if model["appendix"] else "") + ".]")
+        if n > 1 and g["instances_identical"]:
+            w(f"#text(size: 8pt, fill: luma(90))[{n} identical instances of this subassembly in the CAD model; the last column is the CAD count for all {n} (an instance count, not a purchase quantity).]")
+        elif n > 1:
+            w(f"#text(size: 8pt, fill: luma(90))[The {n} instances differ ({esc(g['instances_differ_because'])}); the last column lists each instance's count in the order {', '.join(raw(x) for x in g['instance_ids'])}.]")
+        w(f"#text(size: 8pt, fill: luma(90))[{len(g['occurrences'])} occurrence(s) in the shown instance; ids in manual.json" + (" and the appendix" if model["appendix"] else "") + ".]")
         w("")
         hardware(g.get("hardware", []))
     # joint close-ups
@@ -170,24 +214,36 @@ def render(model):
         if not j["hardware"]:
             w("#text(size: 8pt, fill: luma(90))[No supplementary items are recorded for this joint.]")
             w("")
-    # overview
-    w("#pagebreak(weak: true)")
-    w("== Finished assembly")
-    w(f"#figure(image(\"images/{model['overview_image']}\", width: 100%), caption: [All parts at their CAD positions.])")
     # steps
     if not model["steps"]:
         w(""); w("== Steps"); w("No assembly sequence has been authored for this scene."); w("")
+    chapter_opened = False
     for s in model["steps"]:
         w("#pagebreak()")
+        if s.get("kind") == "deferred" and not chapter_opened:
+            chapter_opened = True
+            w("= Deferred steps (not in this build)")
+            w(f"#text(size: 9pt)[These steps place items outside {esc(model['build_scope']['phase'])}; they are shown seated on the finished build for completeness and are not part of the build sequence above.]")
+            w("")
         w(f"== Step {s['index']}")
         w(f"#text(size: 8pt, fill: luma(90))[\\[{esc(s['id'])}\\]" + (f" after {esc(', '.join(s['requires']))}" if s["requires"] else "") + "]")
+        if s.get("kind") == "conditional":
+            w(f"#text(size: 9pt, weight: \"bold\", fill: rgb(\"#b4400a\"))[CONDITIONAL: {esc(s['rule'] or 'undecided for this build')}]")
+        elif s.get("kind") == "deferred":
+            w("#text(size: 9pt, weight: \"bold\", fill: rgb(\"#b4400a\"))[DEFERRED: not in this build]")
+        elif s.get("deferred_occurrences"):
+            w(f"#text(size: 8pt, fill: rgb(\"#b4400a\"))[Deferred in this step: {esc(', '.join(s['deferred_occurrences']))}]")
         w("")
+        # many part types in one step: smaller pictures so the column stays on the page
+        many = len(s["parts_needed"]) > 4
+        pic_w, qty_pt = (16, 12) if many else (26, 16)
         w("#grid(columns: (34mm, 1fr), column-gutter: 6mm, row-gutter: 4mm,")
         w("  block(stroke: (paint: luma(120), dash: \"dashed\"), inset: 5pt, width: 100%)[")
+        w("    #set par(spacing: 0pt); #set block(spacing: 0pt)")
         w("    #text(size: 7.5pt, fill: luma(80))[PARTS NEEDED] \\")
         for n in s["parts_needed"]:
-            w(f"    #badge({n['label']}) #h(2pt) #text(size: 16pt, weight: \"bold\")[×{n['qty']}] \\")
-            w(f"    #image(\"images/{n['thumbnail']}\", width: 26mm) \\")
+            w(f"    #badge({n['label']}) #h(2pt) #text(size: {qty_pt}pt, weight: \"bold\")[×{n['qty']}] \\")
+            w(f"    #image(\"images/{n['thumbnail']}\", width: {pic_w}mm, height: {pic_w * 0.75:.0f}mm, fit: \"contain\") \\")
         w("  ],")
         if s["result_image"]:
             w("  grid(columns: (2.2fr, 1fr), column-gutter: 4mm,")
@@ -256,7 +312,8 @@ def render(model):
             w(f"  [{row['label']}], [{cell1}], [{cell2}], [{cell3}],")
         w(")")
         for g in model["groups"]:
-            w(f"*Subassembly {g['index']} {esc(g['id'])}* (path {esc(' / '.join(g['path']))}): " + "; ".join(f"{esc(oc['id'])} → part {oc['label']}" for oc in g["occurrences"]) + "\n")
+            w(f"*Subassembly {g['index']} {esc(g['id'])}* (path {esc(' / '.join(g['path']))}; definition {esc(g['definition'])} from {esc(g['definition_basis'])}, {g['instance_count']} instance(s): {esc('; '.join(g['instance_ids']))}): "
+              + "; ".join(f"{esc(oc['id'])} → part {oc['label']}" for oc in g["occurrences"]) + "\n")
         for j in model["joints"]:
             w(f"*Joint {j['index']} {esc(j['joint_id'])}* (context {esc(j['context_text'])}, {esc(j['context_style'])}): "
               + "; ".join(f"{esc(oc['id'])} → part {oc['label']}" for oc in j["occurrences"]) + "; context occurrences: " + (esc("; ".join(j["context_occurrences"])) or "none") + "\n")
@@ -299,3 +356,65 @@ def render(model):
             w(f"  [source {esc(k)}], [{esc(str(v))}],")
         w(")")
     return "\n".join(L) + "\n"
+
+
+def cards(w, model, rows):
+    """The parts grid: three fixed-height cards per row."""
+    w("#grid(columns: (1fr, 1fr, 1fr), column-gutter: 4mm, row-gutter: 4mm,")
+    for row in rows:
+        w(f"  block(width: 100%, height: {CARD_HEIGHT_MM}mm, stroke: 1pt + black, inset: 4pt, clip: true, breakable: false)[")
+        # the card's rows are spaced by the explicit #v() calls only; default paragraph and block
+        # spacing between them overflowed the fixed height and the clip cut the quantity row
+        w("    #set par(spacing: 0pt); #set block(spacing: 0pt)")
+        w(f"    #box(width: 100%, height: {HEAD_HEIGHT_MM}mm, clip: true)[#badge({row['label']}) #h(2pt) #text(weight: \"bold\", size: 9pt)[{esc(row['label_text'])}]]")
+        w("    #v(1pt)")
+        if row.get("end_view"):
+            w(f"    #grid(columns: (2fr, 1fr), column-gutter: 1.5mm, image(\"images/{row['thumbnail']}\", width: 100%, height: {PIC_HEIGHT_MM}mm, fit: \"contain\"), "
+              f"image(\"images/{row['end_view']}\", width: 100%, height: {PIC_HEIGHT_MM}mm, fit: \"contain\"))")
+        else:
+            w(f"    #image(\"images/{row['thumbnail']}\", width: 100%, height: {PIC_HEIGHT_MM}mm, fit: \"contain\")")
+        w("    #v(1pt)")
+        size = esc(row["dimensions"])
+        extra = " \\ " + esc(row["details"]) if row.get("details") else ""
+        extra += " \\ " + esc(row["description"]) if row["description"] else ""
+        if row.get("stock_text"):
+            extra += " \\ " + esc(row["stock_text"])
+        if row.get("intended_configuration_confirmed") is not None:
+            extra += " \\ intended configuration confirmed: " + ("yes" if row["intended_configuration_confirmed"] else "no")
+        if row.get("review_note"):
+            extra += " \\ #text(weight: \"bold\", fill: rgb(\"#b4400a\"))[⚠ " + esc(row["review_note"]) + "]"
+        w(f"    #box(width: 100%, height: {TEXT_HEIGHT_MM}mm, clip: true)[#text(size: 7.5pt, fill: luma(60))[{size}{extra}]]")
+        w("    #v(1fr)")
+        w("    #line(length: 100%, stroke: 0.4pt + luma(150))")
+        # the count box and its label share one line (a horizontal stack never wraps the
+        # label under the box, where the card's clip cut it off)
+        w("    #grid(columns: (1fr, auto), column-gutter: 2mm, align: (left + horizon, right + horizon),")
+        if row.get("scope_kind") is not None:
+            # with a build scope the large number is this build's quantity; the CAD count stays stated beside it
+            # two deliberate lines: the phase quantity, then the CAD count with the conditional and deferred shares
+            line2 = f"CAD qty {row['required']} {esc(row['unit'])}" + (f" · conditional {row['conditional']}" if row["conditional"] else "") + (f" · deferred {row['deferred']}" if row["deferred"] else "")
+            w(f"      [#text(size: 17pt, weight: \"bold\")[{row['this_build']}] #h(2pt) #text(size: 6.5pt, fill: luma(60))[this build {row['this_build']} \\ {line2}]],")
+        else:
+            w(f"      [#text(size: 17pt, weight: \"bold\")[{row['required']}] #h(2pt) #text(size: 6.5pt, fill: luma(60))[CAD qty {row['required']} {esc(row['unit'])}]],")
+        w("      stack(dir: ltr, spacing: 2pt, align(horizon, text(size: 6.5pt, fill: luma(60))[counted]), countbox))")
+        w("  ],")
+    w(")")
+
+
+def checklist(w, model, scope):
+    """One page: every part with its picture, this-build and conditional quantities
+    and blank boxes for a physical verification (count, by, date, location, missing)."""
+    w("#pagebreak(weak: true)")
+    w(f"== Verification checklist: {esc(scope['phase'])}")
+    w(f"#text(size: 8.5pt)[{esc(scope['title'])} ({esc(scope['review_state'])}, decided by {esc(scope['decided_by'])}). Tick what you have for this build; quantities are CAD instance counts for the phase, not purchase quantities. Deferred parts are listed last for completeness.]")
+    w("")
+    w("#set text(size: 7pt)")
+    w("#table(columns: (6mm, 9mm, 1fr, 11mm, 11mm, 13mm, 16mm, 15mm, 17mm, 13mm), stroke: 0.4pt + luma(140), inset: 2pt, align: (center + horizon, center + horizon, left + horizon, center + horizon, center + horizon, center + horizon, left + horizon, left + horizon, left + horizon, center + horizon),")
+    w("  table.header([*\\#*], [], [*Part*], [*this build*], [*cond.*], [*counted*], [*by*], [*date*], [*location*], [*missing*]),")
+    for r in scope["checklist"]:
+        qty = f"[*{r['this_build']}*]" if r["scope_kind"] != "deferred" else "[#text(fill: luma(120))[deferred]]"
+        cond = f"[{r['conditional']}]" if r["conditional"] else "[—]"
+        w(f"  [{r['label']}], [#image(\"images/{r['thumbnail']}\", width: 8mm, height: 5mm, fit: \"contain\")], [{esc(r['label_text'])} #text(fill: luma(110))[(CAD {r['cad']})]], {qty}, {cond}, [], [], [], [], [],")
+    w(")")
+    w("#set text(size: 10.5pt)")
+    w("")

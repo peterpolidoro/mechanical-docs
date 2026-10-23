@@ -65,11 +65,16 @@ figcaption { color: var(--muted); font-size: .9rem; padding-top: 4px; }
 .callouts a:hover rect, .callouts a:focus rect { stroke: var(--accent); fill: rgba(217,72,15,.08); }
 .callouts text { font: 700 44px sans-serif; fill: #fff; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
 .callouts circle { fill: var(--accent); stroke: #fff; stroke-width: 3; }
+.callout-badge { display: inline-block; min-width: 2rem; height: 2rem; line-height: 2rem; text-align: center; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; }
+table.exploded-key { width: 100%; border-collapse: collapse; background: var(--card); font-size: .95rem; margin-top: 12px; }
+table.exploded-key th, table.exploded-key td { border: 1px solid var(--line); padding: 6px 8px; vertical-align: top; text-align: left; }
 section.group { background: var(--card); border: 2px solid var(--ink); margin: 24px 0; padding: 16px; display: grid; grid-template-columns: 1fr 300px; gap: 16px; }
 section.group header { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
 section.group .note { grid-column: 1 / -1; }
 table.group-parts { width: 100%; border-collapse: collapse; }
 table.group-parts td { border-bottom: 1px solid var(--line); padding: 6px 4px; vertical-align: middle; }
+table.group-parts th { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); text-align: left; padding: 2px 4px; }
+section.group .instances { font-weight: 500; color: var(--muted); font-size: 1rem; }
 table.group-parts img { width: 64px; height: 64px; object-fit: contain; background: #fff; border: 1px solid var(--line); }
 table.group-parts .qty { font-size: 1.5rem; font-weight: 800; text-align: center; }
 section.step { background: var(--card); border: 2px solid var(--ink); margin: 24px 0; padding: 16px; display: grid; grid-template-columns: 220px 1fr; grid-template-rows: auto auto; gap: 16px; }
@@ -98,7 +103,7 @@ table.appendix code { font-size: .75rem; }
   .parts-grid { grid-template-columns: repeat(3, 1fr); }
   article.part, figure, table.group-parts tr, table.appendix tr, table.supplement tr { break-inside: avoid; page-break-inside: avoid; }
   section.step, section.group, section.joint, h2.appendix, h2.supplement { break-before: page; page-break-before: always; border-width: 1.5pt; }
-  h2.parts { break-before: page; page-break-before: always; }
+  h2.parts, h2#exploded { break-before: page; page-break-before: always; }
   a { color: inherit; text-decoration: none; }
 }
 @media screen { .print-only { display: none !important; } }
@@ -141,6 +146,26 @@ def callouts_svg(model, out_dir, view_id="overview"):
     return "\n".join(out)
 
 
+def exploded_callouts_svg(ev):
+    """Numbered callouts over the exploded view: the subassembly numbers, each a
+    link to its section (the root parts to the parts list); web only."""
+    W, H_ = ev["width"], ev["height"]
+    if not W or not H_:
+        return ""
+    r = max(18, round(min(W, H_) * 0.028))
+    out = [f'<svg class="callouts web-only" viewBox="0 0 {W} {H_}" aria-label="Subassembly callouts (web only)">']
+    for c in ev["callouts"]:
+        if not c["box_px"] or not c.get("anchor_px"):
+            continue
+        x0, y0, x1, y1 = c["box_px"]; ax, ay = c["anchor_px"]
+        href = f"#group-{slug(c['group_id'])}" if c["kind"] == "subassembly" else "#parts"
+        out.append(f'<a href="{href}" data-callout="{c["number"]}"><title>{H.escape(c["definition"])}: subassembly {c["number"]}</title>'
+                   f'<rect x="{x0:.0f}" y="{y0:.0f}" width="{x1 - x0:.0f}" height="{y1 - y0:.0f}"/>'
+                   f'<circle cx="{ax:.0f}" cy="{ay:.0f}" r="{r}"/><text x="{ax:.0f}" y="{ay:.0f}" style="font-size:{int(r * 1.2)}px">{c["number"]}</text></a>')
+    out.append("</svg>")
+    return "\n".join(out)
+
+
 def render(model, out_dir, embed_images=False):
     e = H.escape
     src = lambda name: img_src(model, name, out_dir, embed_images)  # noqa: E731
@@ -155,13 +180,54 @@ def render(model, out_dir, embed_images=False):
         o.append(f"<p>{e(line)}</p>")
     o.append("</div>")
 
-    # parts: picture-led cards
+    # front page: the whole assembly, then the subassemblies drawn apart with numbered links to their sections
+    o.append('<h2 id="overview">Finished assembly</h2>')
+    o.append('<figure><div class="overview-wrap">')
+    o.append(f'<img src="{src(model["overview_image"])}" alt="Overview of the finished assembly">')
+    o.append(callouts_svg(model, out_dir, "overview"))
+    o.append("</div><figcaption>All parts at their CAD positions. On the web, click a numbered callout to jump to the part.</figcaption></figure>")
+    ev = model.get("exploded_view")
+    if ev:
+        o.append('<h2 id="exploded">Subassemblies, drawn apart</h2>')
+        o.append(f'<p class="hint">{e(ev["note"])}. The numbers are the subassembly sections of this document, one callout per subassembly on one of its instances; click a number to jump there.</p>')
+        o.append('<figure><div class="overview-wrap">')
+        o.append(f'<img src="{src(ev["image"])}" alt="The subassemblies drawn apart">')
+        o.append(exploded_callouts_svg(ev))
+        o.append("</div><figcaption>Illustration offsets only (recorded in manual.json); nothing here is an assembly order.</figcaption></figure>")
+        o.append('<table class="exploded-key"><thead><tr><th>#</th><th>Subassembly</th><th>Instances</th><th>Go to</th></tr></thead><tbody>')
+        for c in ev["callouts"]:
+            if c["kind"] == "subassembly":
+                o.append(f'<tr data-callout="{c["number"]}" data-callout-target="{e(c["group_id"])}"><td><span class="callout-badge">{c["number"]}</span></td>'
+                         f'<td><strong>{e(c["definition"])}</strong> ({c["instance_count"]} in this project)<br><span class="hint">callout on <code>{e(c["callout_instance"])}</code></span></td>'
+                         f'<td>{", ".join(f"<code>{e(x)}</code>" for x in c["instance_ids"])}</td><td><a href="#group-{slug(c["group_id"])}">Subassembly {c["number"]}</a></td></tr>')
+            else:
+                o.append(f'<tr data-callout="{c["number"]}" data-callout-target="{e(c["group_id"])}"><td><span class="callout-badge">{c["number"]}</span></td>'
+                         f'<td><strong>Parts directly under the root</strong><br>' + "; ".join(f'<a href="#part-{slug(p["part_id"])}"><span class="label">{p["label"]}</span></a>{e(p["label_text"])} ×{p["qty"]}' for p in c["parts"]) + "</td>"
+                         f'<td>{", ".join(f"<code>{e(x)}</code>" for x in c["occurrence_ids"])}</td><td><a href="#parts">Parts</a></td></tr>')
+        o.append("</tbody></table>")
+        if ev["without_page"]:
+            o.append('<p class="hint">Moved without a section of their own: ' + ", ".join(f"<code>{e(x)}</code>" for x in ev["without_page"]) + ".</p>")
+        if model.get("viewer"):
+            v = model["viewer"]
+            o.append(f'<p class="hint">Viewer data beside this manual: {", ".join(f"<code>{e(p)}</code>" for p in v["files"].values())} and <code>{e(v["hotspots"])}</code> '
+                     f'(metres, +Y up; {v["triangles_instanced"]} drawn triangles under a budget of {v["triangle_budget"]} per file).</p>')
+
+    # parts: picture-led cards (the build's parts; with a build scope the parts deferred entirely follow in their own section)
+    scope = model.get("build_scope")
     o.append('<h2 class="parts" id="parts">Parts</h2>')
-    o.append(f"<p class=\"hint\">{e(model['cad_qty_note'])} Write the quantity you count in the box.</p>")
+    o.append(f"<p class=\"hint\">{e(model['cad_qty_note'])}" + (f" The large number is the quantity for {e(scope['phase'])} (this build); conditional and deferred quantities are stated beside it." if scope else "") + " Write the quantity you count in the box.</p>")
     o.append(f"<p class=\"hint\">Inventory status: {e(model['inventory_status'])}.</p>")
+    build_rows = [r for r in model["inventory"] if r.get("scope_kind") != "deferred"]
+    deferred_rows = [r for r in model["inventory"] if r.get("scope_kind") == "deferred"]
     o.append('<div class="parts-grid">')
-    for row in model["inventory"]:
-        o.append(f'<article class="part" id="part-{slug(row["part_id"])}" data-part="{e(row["part_id"])}" data-required="{row["required"]}" data-label="{row["label"]}">')
+    for row in build_rows + deferred_rows:
+        if deferred_rows and row is deferred_rows[0]:
+            o.append("</div>")
+            o.append('<h2 class="parts" id="deferred-parts">Deferred (not in this build)</h2>')
+            o.append(f'<p class="hint">These parts stay in the CAD model and its counts but are not part of {e(scope["phase"])}: {e(scope["title"])}.</p>')
+            o.append('<div class="parts-grid">')
+        scoped = f' data-this-build="{row["this_build"]}" data-scope-kind="{row["scope_kind"]}"' if row.get("scope_kind") is not None else ""
+        o.append(f'<article class="part" id="part-{slug(row["part_id"])}" data-part="{e(row["part_id"])}" data-required="{row["required"]}" data-label="{row["label"]}"{scoped}>')
         o.append(f'<h3><span class="label">{row["label"]}</span><span>{e(row["label_text"])}</span></h3>')
         if row.get("end_view"):
             o.append(f'<div class="pic long"><img src="{src(row["thumbnail"])}" alt="{e(row["label_text"])}, long view">'
@@ -174,12 +240,27 @@ def render(model, out_dir, embed_images=False):
                  + (f'<br>{e(row["stock_text"])}' if row.get("stock_text") else "")
                  + (f'<br>intended configuration confirmed: {"yes" if confirmed else "no"}' if confirmed is not None else "")
                  + (f'<br><strong class="review">⚠ {e(row["review_note"])}</strong>' if row.get("review_note") else "") + "</div>")
-        o.append(f'<div class="qty-row"><div class="cadqty">{row["required"]}<small>CAD qty, {e(row["unit"])}</small></div>'
+        if row.get("scope_kind") is not None:
+            small = f"this build · CAD qty {row['required']} {e(row['unit'])}" + (f" · conditional {row['conditional']}" if row["conditional"] else "") + (f" · deferred {row['deferred']}" if row["deferred"] else "")
+            big = f'<div class="cadqty">{row["this_build"]}<small>{small}</small></div>'
+        else:
+            big = f'<div class="cadqty">{row["required"]}<small>CAD qty, {e(row["unit"])}</small></div>'
+        o.append(f'<div class="qty-row">{big}'
                  f'<div><input class="count web-only" type="number" min="0" value="" aria-label="paper count for {e(row["label_text"])} (not stored)">'
                  f'<span class="count-box print-only"></span><small class="hint" style="display:block;text-align:center">counted</small></div></div>')
         o.append("</article>")
     o.append("</div>")
     o.append(f"<p class=\"hint\">{e(model['count_box_note'])}</p>")
+    if scope:
+        o.append(f'<h2 id="checklist">Verification checklist: {e(scope["phase"])}</h2>')
+        o.append(f'<p class="hint">{e(scope["title"])} ({e(scope["review_state"])}, decided by {e(scope["decided_by"])}). Tick what you have for this build; quantities are CAD instance counts for the phase, not purchase quantities. Deferred parts are listed last for completeness.</p>')
+        o.append('<table class="supplement checklist"><thead><tr><th>#</th><th></th><th>Part</th><th>this build</th><th>cond.</th><th>counted</th><th>by</th><th>date</th><th>location</th><th>missing</th></tr></thead><tbody>')
+        for r in scope["checklist"]:
+            qty = f'<strong>{r["this_build"]}</strong>' if r["scope_kind"] != "deferred" else '<span class="hint">deferred</span>'
+            o.append(f'<tr data-check-part="{e(r["part_id"])}" data-this-build="{r["this_build"]}"><td><span class="label">{r["label"]}</span></td><td><img src="{src(r["thumbnail"])}" alt="" style="width:40px;height:28px;object-fit:contain"></td>'
+                     f'<td>{e(r["label_text"])} <span class="hint">(CAD {r["cad"]})</span></td><td>{qty}</td><td>{r["conditional"] or "—"}</td>'
+                     '<td><span class="count-box"></span></td><td></td><td></td><td></td><td><span class="count-box"></span></td></tr>')
+        o.append("</tbody></table>")
 
     # supplementary items (not modelled in CAD): existing-design rows only; new-design rows in the appendix
     sup = model["supplement"]
@@ -217,19 +298,32 @@ def render(model, out_dir, embed_images=False):
         o.append('<p class="hint">Each view shows one subassembly alone with its parts at their CAD positions. These are parts views for inspection, not assembly steps: no order, fasteners or tool access is implied.</p>')
     for g in model["groups"]:
         gslug = slug(g["id"])
-        o.append(f'<section class="group" id="group-{gslug}" data-group="{e(g["id"])}" data-index="{g["index"]}">')
-        o.append(f'<header><div class="step-number">{g["index"]}</div><div><div class="kicker">Subassembly</div><div style="font-size:1.2rem;font-weight:700">{e(g["short_name"])}</div>'
-                 f'<div class="step-title"><code>{e(g["id"])}</code>' + (f' · under <code>{e(g["parent_id"])}</code>' if g["parent_id"] else "") + "</div></div></header>")
+        n = g["instance_count"]
+        o.append(f'<section class="group" id="group-{gslug}" data-group="{e(g["id"])}" data-index="{g["index"]}" data-instance-count="{n}" data-identical="{str(g["instances_identical"]).lower()}">')
+        o.append(f'<header><div class="step-number">{g["index"]}</div><div><div class="kicker">Subassembly</div><div style="font-size:1.2rem;font-weight:700">{e(g["definition"])} <span class="instances">({n} in this project)</span></div>'
+                 f'<div class="step-title">shown: <code>{e(g["id"])}</code>' + (f' · under <code>{e(g["parent_id"])}</code>' if g["parent_id"] else "")
+                 + ((" · other instance" + ("s" if len(g["other_instance_ids"]) > 1 else "") + ": " + ", ".join(f"<code>{e(x)}</code>" for x in g["other_instance_ids"])) if g["other_instance_ids"] else "")
+                 + f' · definition from the exporter\'s {e(g["definition_basis"])}' + (f' · {e(g["content_notes"])}' if g.get("content_notes") else "") + "</div></div></header>")
         o.append('<figure><div class="overview-wrap">')
         o.append(f'<img src="{src(g["image"])}" alt="Subassembly {g["index"]}: {e(g["short_name"])}">')
         o.append(callouts_svg(model, out_dir, g["view_id"]))
         o.append(f'</div><figcaption>{e(g["note"])}.</figcaption></figure>')
-        o.append('<table class="group-parts"><tbody>')
+        o.append('<table class="group-parts">')
+        if n > 1:
+            o.append(f'<thead><tr><th></th><th></th><th>Part</th><th>Per subassembly</th><th>{f"For all {n}" if g["instances_identical"] else "Each instance"}</th></tr></thead>')
+        o.append("<tbody>")
         for p in g["parts"]:
-            o.append(f'<tr data-gpart="{e(p["part_id"])}" data-qty="{p["qty"]}"><td><span class="label">{p["label"]}</span></td>'
-                     f'<td><img src="{src(p["thumbnail"])}" alt="{e(p["label_text"])}"></td><td>{e(p["label_text"])}</td><td class="qty">×{p["qty"]}</td></tr>')
+            row = (f'<tr data-gpart="{e(p["part_id"])}" data-qty="{p["qty"]}"' + (f' data-total="{p["total_qty"]}"' if p["total_qty"] is not None else "") + f'><td><span class="label">{p["label"]}</span></td>'
+                   f'<td><img src="{src(p["thumbnail"])}" alt="{e(p["label_text"])}"></td><td>{e(p["label_text"])}</td><td class="qty">×{p["qty"]}</td>')
+            if n > 1:
+                row += f'<td class="qty">×{p["total_qty"]}</td>' if g["instances_identical"] else f'<td class="hint">{e(" / ".join(str(q) for q in p["per_instance"]))}</td>'
+            o.append(row + "</tr>")
         o.append("</tbody></table>")
-        o.append(f'<p class="note hint">{len(g["occurrences"])} occurrence(s) in this subassembly; ids in manual.json' + (" and the appendix" if model["appendix"] else "") + ".</p>")
+        if n > 1 and g["instances_identical"]:
+            o.append(f'<p class="note hint">{n} identical instances of this subassembly in the CAD model; the last column is the CAD count for all {n} (an instance count, not a purchase quantity).</p>')
+        elif n > 1:
+            o.append(f'<p class="note hint">The {n} instances differ ({e(g["instances_differ_because"])}); the last column lists each instance\'s count in the order ' + ", ".join(f"<code>{e(x)}</code>" for x in g["instance_ids"]) + ".</p>")
+        o.append(f'<p class="note hint">{len(g["occurrences"])} occurrence(s) in the shown instance; ids in manual.json' + (" and the appendix" if model["appendix"] else "") + ".</p>")
         hardware_list(g.get("hardware", []), "data-sgroup", g["id"])
         o.append("</section>")
 
@@ -256,21 +350,26 @@ def render(model, out_dir, embed_images=False):
             o.append('<p class="note hint">No supplementary items are recorded for this joint.</p>')
         o.append("</section>")
 
-    # overview
-    o.append('<h2 id="overview">Finished assembly</h2>')
-    o.append('<figure><div class="overview-wrap">')
-    o.append(f'<img src="{src(model["overview_image"])}" alt="Overview of the finished assembly">')
-    o.append(callouts_svg(model, out_dir, "overview"))
-    o.append("</div><figcaption>All parts at their CAD positions. On the web, click a numbered callout to jump to the part.</figcaption></figure>")
-
     # steps
     if model["steps"]:
         o.append('<h2 id="steps">Steps</h2>')
     else:
         o.append('<h2 id="steps">Steps</h2><p class="hint">No assembly sequence has been authored for this scene.</p>')
+    chapter_opened = False
     for s in model["steps"]:
-        o.append(f'<section class="step" id="step-{s["index"]}" data-step="{e(s["id"])}" data-index="{s["index"]}">')
-        o.append(f'<header><div class="step-number">{s["index"]}</div><div class="step-title"><code>{e(s["id"])}</code>' + (f' &middot; after {", ".join(e(r) for r in s["requires"])}' if s["requires"] else "") + "</div></header>")
+        if s.get("kind") == "deferred" and not chapter_opened:
+            chapter_opened = True
+            o.append('<h2 id="deferred-steps">Deferred steps (not in this build)</h2>')
+            o.append(f'<p class="hint">These steps place items outside {e(model["build_scope"]["phase"])}; they are shown seated on the finished build for completeness and are not part of the build sequence above.</p>')
+        o.append(f'<section class="step" id="step-{s["index"]}" data-step="{e(s["id"])}" data-index="{s["index"]}" data-kind="{e(s.get("kind", "build"))}">')
+        marker = ""
+        if s.get("kind") == "conditional":
+            marker = f'<div class="review" style="font-weight:700">CONDITIONAL: {e(s["rule"] or "undecided for this build")}</div>'
+        elif s.get("kind") == "deferred":
+            marker = '<div class="review" style="font-weight:700">DEFERRED: not in this build</div>'
+        elif s.get("deferred_occurrences"):
+            marker = f'<div class="review">Deferred in this step: {", ".join(f"<code>{e(x)}</code>" for x in s["deferred_occurrences"])}</div>'
+        o.append(f'<header><div class="step-number">{s["index"]}</div><div><div class="step-title"><code>{e(s["id"])}</code>' + (f' &middot; after {", ".join(e(r) for r in s["requires"])}' if s["requires"] else "") + f"</div>{marker}</div></header>")
         o.append('<div class="needed"><h3>Parts needed</h3>')
         for n in s["parts_needed"]:
             o.append(f'<div class="item" data-part="{e(n["part_id"])}" data-qty="{n["qty"]}"><img src="{src(n["thumbnail"])}" alt="{e(n["name"])}" width="90" height="90"><div><span class="label">{n["label"]}</span><br><span class="qty">×{n["qty"]}</span></div></div>')
@@ -331,7 +430,8 @@ def render(model, out_dir, embed_images=False):
                      + (f'<br>reference only: {"; ".join(e(x) for x in row["reference_occurrences"])}' if row["reference_occurrences"] else "") + "</td></tr>")
         o.append("</tbody></table>")
         for g in model["groups"]:
-            o.append(f'<p class="hint"><strong>Subassembly {g["index"]} {e(g["id"])}</strong> (path {" / ".join(e(x) for x in g["path"])}): '
+            o.append(f'<p class="hint"><strong>Subassembly {g["index"]} {e(g["id"])}</strong> (path {" / ".join(e(x) for x in g["path"])}; definition {e(g["definition"])} from {e(g["definition_basis"])}, '
+                     f'{g["instance_count"]} instance(s): {"; ".join(e(x) for x in g["instance_ids"])}): '
                      + "; ".join(f'{e(oc["id"])} → part {oc["label"]}' for oc in g["occurrences"]) + "</p>")
         for j in model["joints"]:
             o.append(f'<p class="hint"><strong>Joint {j["index"]} {e(j["joint_id"])}</strong> (context {e(j["context_text"])}, {e(j["context_style"])}): '

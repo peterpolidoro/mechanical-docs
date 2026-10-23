@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "scene": "scene.json",
+  "phase": "fixture-phase-1",
+  "title": "Base and one pin (synthetic phase scope)",
+  "decided_by": "fixture author, 2026-10-23",
+  "review_state": "draft",
+  "deferred_occurrence_ids": ["pin-b"],
+  "conditional_groups": [],
+  "backlight": "not applicable to the fixture",
+  "deferred_design": ["second pin"],
+  "note": "Synthetic scope to exercise the documentation: pin B is deferred, the base and pin A are in this build. Not a project decision."
+}

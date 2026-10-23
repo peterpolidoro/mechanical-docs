@@ -14,14 +14,18 @@ pose (the scene's +Z-up frame, scaled to metres exactly once), and renders:
     part-<part>-end.png      a long part seen straight along its long axis: the
                              profile or end detail that identifies it
     overview.png             the finished assembly, instruction camera
+    exploded.png             the subassemblies drawn apart (render.json `exploded_view`): every
+                             child assembly of the root and the parts directly under it moved
+                             as a rigid body by a recorded offset (radial default or the
+                             project's override); an illustration, not an order
     group-<assembly>.png     one subassembly alone, every occurrence at its canonical
                              pose, auto-framed: an inspection/parts view, not a step
     joint-<joint>.png        a close-up of one project joint (render.json `joint_views`):
                              the listed occurrences framed alone at their canonical
                              poses, the rest of their context assembly faded or
                              hidden: an inspection view, not a step
-    step-NN-<step>.png       parts installed before the step subdued (flat grey
-                             silhouettes, thin outline), the step's additions in
+    step-NN-<step>.png       parts installed before the step ghosted (flat grey over
+                             transparency, `step_context_alpha`; thin outline), the step's additions in
                              their looks with a thick outline, later parts hidden;
                              with an approach hint the addition is drawn displaced
                              by the hint's start offset and an arrow points along
@@ -63,7 +67,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
-from mechanical_docs import geometry, receipts  # noqa: E402
+from mechanical_docs import explode, geometry, receipts  # noqa: E402
 from mechanical_docs import transforms as T  # noqa: E402
 from mechanical_docs.manifest import ManifestError, load_project  # noqa: E402
 from mechanical_docs.names import slug  # noqa: E402
@@ -163,7 +167,8 @@ class Renderer:
         self.warnings = []
         bpy.ops.wm.read_factory_settings(use_empty=True)
         self.scn = bpy.context.scene
-        self.states = derive_states(project.instructions, self.scene) if project.instructions is not None else []
+        deferred = project.build_scope.deferred_ids(self.scene) if project.build_scope is not None else ()
+        self.states = derive_states(project.instructions, self.scene, deferred) if project.instructions is not None else []
         self.import_meshes()
         self.instantiate()
         self.make_materials()
@@ -276,6 +281,28 @@ class Renderer:
             return m
 
         self.context_mat = flat("md_context", self.s["context_color"])
+
+        def ghost(name, color, alpha):
+            """The flat context colour over transparency: what a step draws its
+            already-installed parts with, so an addition behind them stays visible."""
+            m = bpy.data.materials.new(name); m.use_nodes = True
+            nt = m.node_tree
+            for node in list(nt.nodes):
+                if node.type != "OUTPUT_MATERIAL":
+                    nt.nodes.remove(node)
+            em = nt.nodes.new("ShaderNodeEmission")
+            em.inputs["Color"].default_value = (color[0], color[1], color[2], 1); em.inputs["Strength"].default_value = 1.0
+            tr = nt.nodes.new("ShaderNodeBsdfTransparent")
+            mix = nt.nodes.new("ShaderNodeMixShader"); mix.inputs["Fac"].default_value = alpha
+            nt.links.new(tr.outputs[0], mix.inputs[1]); nt.links.new(em.outputs[0], mix.inputs[2])
+            nt.links.new(mix.outputs[0], nt.nodes["Material Output"].inputs["Surface"])
+            try:
+                m.surface_render_method = "BLENDED"       # EEVEE Next
+            except Exception:
+                pass
+            return m
+
+        self.ghost_mat = ghost("md_ghost", self.s["context_color"], self.s["step_context_alpha"]) if self.s["step_context_alpha"] < 1.0 else self.context_mat
         self.arrow_mat = flat("md_arrow", self.s["arrow"]["color"])
         # every mesh gets one slot; objects override it per view (slot link OBJECT)
         for pid, mesh in self.mesh_of.items():
@@ -695,6 +722,45 @@ class Renderer:
         self.restore(); self.verify_restored(view_id)
         return rec
 
+    def render_exploded(self, plan):
+        """The subassemblies drawn apart: every top-level group (a child assembly
+        of the root with all its occurrences, or the parts directly under the
+        root) moved as a rigid body by its offset from `exploded_view`, all in
+        their looks with outlines when affordable. Illustration transforms only:
+        nothing is hidden or reordered, and the installed poses are restored and
+        verified afterwards like every other view."""
+        view_id = "exploded"
+        self.restore()
+        for g in plan["groups"]:
+            off = Vector(g["offset_mm"]) * 0.001
+            for oid in g["occurrence_ids"]:
+                o = self.obj_of[oid]
+                o.location = o.location + off
+        bpy.context.view_layer.update()
+        for o in self.obj_of.values():
+            self.coll_subject.objects.link(o)
+        self.set_resolution(self.long_side(), self.s["aspect"])
+        pts = [o.matrix_world @ Vector(c) for o in self.obj_of.values() for c in o.bound_box]
+        mn, mx = aabb_of(pts); ctr = (mn + mx) / 2
+        d = Vector(plan["direction"]).normalized() if plan.get("direction") else Vector(self.s["overview_direction"]).normalized()
+        self.aim(ctr + d * max((mx - mn).length, 1e-3) * 4, ctr, Vector((0, 0, 1)))
+        framed = self.fit(pts, "orthographic", plan["fill"])
+        self.place_floor(list(self.obj_of.values()), "exploded")
+        path, secs = self.render_to(view_id, self.samples())
+        hs = self.hotspots(view_id, list(self.obj_of))
+        hs["groups"] = {g["id"]: list(g["occurrence_ids"]) for g in plan["groups"]}
+        hs["offsets_mm"] = plan["offsets_mm"]
+        self.write_hotspots(hs)
+        rec = self.view_record(view_id, path, secs, kind="exploded", visible=list(self.obj_of), framed=framed,
+                               offsets_mm=plan["offsets_mm"], spread=plan["spread"],
+                               groups=[{"id": g["id"], "offset_mm": g["offset_mm"], "source": g["source"], "occurrence_ids": list(g["occurrence_ids"])} for g in plan["groups"]],
+                               direction=[round(v, 4) for v in d], direction_from_settings=plan.get("direction") is not None,
+                               poses="exploded", exploded=True, extent_m=[round(v, 4) for v in (mx - mn)],
+                               note="exploded illustration: the top-level groups moved apart as rigid bodies by the recorded offsets; "
+                                    "not an assembly step, no order, fastener or tool access implied")
+        self.restore(); self.verify_restored(view_id)
+        return rec
+
     def facing_direction(self, default, extent):
         """The configured view direction, except that a flat group (one extent
         under a fifth of the next, like a panel with its handles) is viewed
@@ -809,7 +875,7 @@ class Renderer:
         for oid in st.hidden:
             self.obj_of[oid].hide_render = True
         for oid in st.before:
-            o = self.obj_of[oid]; o.material_slots[0].material = self.context_mat; self.coll_context.objects.link(o)
+            o = self.obj_of[oid]; o.material_slots[0].material = self.ghost_mat; self.coll_context.objects.link(o)
         for oid in st.added:
             self.coll_subject.objects.link(self.obj_of[oid])
         approach = None
@@ -839,7 +905,8 @@ class Renderer:
         hs = self.hotspots(view_id, visible)
         self.write_hotspots(hs)
         rec = self.view_record(view_id, path, secs, kind="step-result" if result else "step", step_id=step.id, step_index=st.index,
-                               visible=visible, highlighted=st.added, subdued=st.before, hidden=st.hidden, approach=approach, framed=framed)
+                               visible=visible, highlighted=st.added, subdued=st.before, hidden=st.hidden, approach=approach, framed=framed,
+                               context_alpha=self.s["step_context_alpha"], deferred=st.deferred)
         self.restore(); self.verify_restored(view_id)
         return rec
 
@@ -849,13 +916,15 @@ class Renderer:
 
     # ---------------------------------------------------------------- run
 
-    def plan(self, groups=(), joints=()):
+    def plan(self, groups=(), joints=(), exploded=None):
         plan = []
         for pid in self.scene.parts:
             plan.append((f"part-{slug(pid)}", lambda pid=pid: self.render_thumbnail(pid)))
             if self.thumb_style[pid][0] == "long" and self.s["thumbnail_end_view"]:
                 plan.append((f"part-{slug(pid)}-end", lambda pid=pid: self.render_part_end(pid)))
         plan.append(("overview", self.render_overview))
+        if exploded and exploded["enabled"]:
+            plan.append(("exploded", lambda: self.render_exploded(exploded)))
         for gid in groups:
             plan.append((f"group-{slug(gid)}", lambda gid=gid: self.render_group(gid)))
         for jv in joints:
@@ -887,7 +956,7 @@ class Renderer:
                         "reused_generated_at_utc": reuse["generated_at_utc"], "reused_blender": reuse.get("blender")})
         return rec
 
-    def run(self, only=None, groups=(), reuse=None, joints=()):
+    def run(self, only=None, groups=(), reuse=None, joints=(), exploded=None, instructions_changed=False):
         """Render the plan. `only` restricts rendering to those view ids; with
         `reuse`, every other planned view present in the earlier receipt is
         copied and views absent from it are rendered. Returns (views, missing)."""
@@ -897,11 +966,15 @@ class Renderer:
         missing = []
         self.stale = {}
         joint_specs = {jv["view_id"]: jv for jv in joints}
+        step_states = {}
+        for st in self.states:
+            vid = f"step-{st.index:02d}-{slug(st.step.id)}"
+            step_states[vid] = (st.added, st.before); step_states[vid + "-result"] = (st.added, st.before)
         budget = self.s["lines"]["preview_max_triangles" if self.preview else "max_triangles"]
-        for view_id, fn in self.plan(groups, joints):
+        for view_id, fn in self.plan(groups, joints, exploded):
             wanted = not only or view_id in only
             if reuse is not None and view_id in old and not (only and view_id in only):
-                reason = stale_reason(old[view_id], joint_specs, self.lines_enabled, budget)
+                reason = stale_reason(old[view_id], joint_specs, self.lines_enabled, budget, exploded, instructions_changed, step_states)
                 if reason is None:
                     rec = self.reuse_view(old[view_id], reuse)
                     views.append(rec)
@@ -924,7 +997,7 @@ def main(argv):
     if len(argv) < 3:
         raise SystemExit(__doc__)
     project_dir, meshes_path, out_dir = Path(argv[0]), Path(argv[1]), Path(argv[2])
-    preview = False; only = None; engine = None; lines = True; cli_groups = []; reuse_dir = None; i = 3
+    preview = False; only = None; engine = None; lines = True; cli_groups = []; reuse_dir = None; i = 3; instructions_changed = False
     while i < len(argv):
         if argv[i] == "--preview":
             preview = True; i += 1
@@ -966,6 +1039,10 @@ def main(argv):
         if g not in groups:
             groups.append(g)
     joints = resolve_joint_views(project.scene, settings["joint_views"])
+    try:
+        exploded = explode.resolve(project.scene, meshes, settings)
+    except ValueError as e:
+        raise SystemExit(str(e))
     reuse = None
     if reuse_dir is not None:
         rp = reuse_dir / "render-receipt.json"
@@ -976,11 +1053,14 @@ def main(argv):
         reasons = []
         if old.get("kind") != "mechanical-docs-render-receipt":
             reasons.append("not a render receipt")
-        # the inventory and the supplement never change a pixel: a stock record or a
-        # new supplement row must not force a full re-render
-        skip = project.non_render_inputs()
-        if {k: v for k, v in (old.get("input_hashes") or {}).items() if k not in skip} != project.render_input_hashes():
-            reasons.append("different scene, asset or instruction hashes")
+        # the inventory, the supplement and the build scope never change a pixel by
+        # themselves (a changed step state is caught per view); the instructions may
+        # differ too, which stales the overview and every step view but nothing else
+        geometry = project.geometry_input_hashes()
+        if {k: v for k, v in (old.get("input_hashes") or {}).items() if k in geometry} != geometry:
+            reasons.append("different scene or asset hashes")
+        ins_key = str(project.instructions.file.relative_to(project.dir)) if project.instructions is not None else "instructions.json"
+        instructions_changed = (old.get("input_hashes") or {}).get(ins_key) != project.input_hashes().get(ins_key)
         if old.get("mesh_hashes") != {pid: rec["mesh"]["sha256"] for pid, rec in meshes["parts"].items()}:
             reasons.append("different meshes")
         if old.get("engine") != want_engine:
@@ -995,7 +1075,7 @@ def main(argv):
                  "generated_at_utc": old.get("generated_at_utc"), "blender": old.get("blender")}
     t0 = time.time()
     r = Renderer(project, meshes, settings, out_dir, preview, engine, lines)
-    views, missing = r.run(only, groups, reuse, joints)
+    views, missing = r.run(only, groups, reuse, joints, exploded, instructions_changed if reuse else False)
     reused = [v["id"] for v in views if v.get("reused_from")]
     receipt = {
         "kind": "mechanical-docs-render-receipt", "generated_at_utc": receipts.utc_now(),
@@ -1009,7 +1089,13 @@ def main(argv):
         "input_hashes": project.input_hashes(), "meshes_json_sha256": receipts.sha256_file(meshes_path),
         "mesh_hashes": {pid: rec["mesh"]["sha256"] for pid, rec in meshes["parts"].items()},
         "partial": bool(missing), "missing_views": missing, "inventory_only": project.instructions is None,
-        "inspection_groups": groups, "joint_views": joints, "reused_from": reuse["receipt_path"] if reuse else None, "reused_views": reused,
+        "build_scope": None if project.build_scope is None else {"file": str(project.build_scope.file.relative_to(project.dir)), "sha256": project.build_scope.sha256, "phase": project.build_scope.phase,
+                                                                   "deferred_steps": [st.step.id for st in r.states if st.deferred], "deferred_occurrences": project.build_scope.deferred_ids(project.scene)},
+        "instructions_changed_since_reused": instructions_changed if reuse else None,
+        "inspection_groups": groups, "joint_views": joints,
+        "exploded_view": {"enabled": exploded["enabled"], "spread": exploded["spread"], "direction": exploded["direction"], "offsets_mm": exploded["offsets_mm"],
+                          "groups": [{"id": g["id"], "offset_mm": g["offset_mm"], "source": g["source"], "occurrences": len(g["occurrence_ids"])} for g in exploded["groups"]]},
+        "reused_from": reuse["receipt_path"] if reuse else None, "reused_views": reused,
         "rendered_views": [v["id"] for v in views if not v.get("reused_from")], "stale_reused_views": r.stale, "views": views,
         "checks": r.checks, "warnings": r.warnings,
         "all_checks_passed": not r.checks["problems"] and all(c["passed"] for c in r.checks["mesh_bounds_match"]) and all(c["passed"] for c in r.checks["restoration"]),

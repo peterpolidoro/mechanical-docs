@@ -30,8 +30,8 @@ from .procedure import approach_pose, derive_states
 
 
 def inspect_report(project):
-    sc, ins, inv = project.scene, project.instructions, project.inventory
-    states = derive_states(ins, sc) if ins is not None else []
+    sc, ins, inv, bs = project.scene, project.instructions, project.inventory, project.build_scope
+    states = derive_states(ins, sc, bs.deferred_ids(sc) if bs is not None else ()) if ins is not None else []
     parts = []
     for p in sc.parts.values():
         parts.append({
@@ -52,7 +52,7 @@ def inspect_report(project):
     for st in states:
         ap = approach_pose(sc, st)
         steps.append({"index": st.index, "id": st.step.id, "requires": st.step.requires, "add": st.added, "view": st.step.view,
-                      "installed_before": st.before, "installed_after": st.after, "hidden": st.hidden,
+                      "installed_before": st.before, "installed_after": st.after, "hidden": st.hidden, "deferred": st.deferred,
                       "parts_needed": st.parts_needed, "caption": st.step.caption,
                       "approach": None if ap is None else {"occurrence_id": ap[0], "start_world_translation": T.translation(ap[1]),
                                                            "end_world_translation": T.translation(ap[2]),
@@ -73,6 +73,15 @@ def inspect_report(project):
                       "on_hand_unknown": sum(1 for r in rows if r["on_hand_each"] is None),
                       "unplaced": sum(1 for r in rows if not r["attaches_to"]),
                       "joint_ids": sorted({r["joint_id"] for r in rows}), "items": rows}
+    build_scope = None
+    if bs is not None:
+        q = bs.part_quantities(sc)
+        build_scope = {"phase": bs.phase, "title": bs.title, "decided_by": bs.decided_by, "review_state": bs.review_state,
+                       "deferred_occurrence_ids": bs.deferred_occurrence_ids, "deferred_occurrences_total": len(bs.deferred_ids(sc)),
+                       "conditional_groups": [vars(g) for g in bs.conditional_groups], "conditional_occurrences": len(bs.conditional_ids(sc)),
+                       "backlight": bs.backlight, "deferred_design": bs.deferred_design, "note": bs.note,
+                       "this_build_total": sum(v["this_build"] for v in q.values()), "parts_deferred_entirely": [p for p, v in q.items() if v["this_build"] == 0 and v["conditional"] == 0],
+                       "part_quantities": q, "deferred_steps": [st.step.id for st in states if st.deferred]}
     return {
         "kind": "mechanical-docs-inspect-report", "generated_at_utc": receipts.utc_now(), **receipts.python_info(),
         "project_dir": str(project.dir), "scene": {"id": sc.id, "title": sc.title, "units": sc.units, "coordinate_system": sc.coordinate_system,
@@ -82,6 +91,7 @@ def inspect_report(project):
         "instructions": None if ins is None else {"id": ins.id, "title": ins.title, "review_state": ins.review_state, "views": {v.id: vars(v) for v in ins.views.values()}},
         "inventory_status": inv.status,
         "supplement": supplement,
+        "build_scope": build_scope,
         "counts": {"part_types": len(sc.parts), "assemblies": len(sc.assemblies), "occurrences": len(sc.occurrences),
                    "reference_only_occurrences": sum(1 for o in sc.occurrences.values() if not o.installed), "steps": len(ins.steps) if ins else 0},
         "findings": {"coincident_occurrences": sc.coincident},
@@ -90,7 +100,8 @@ def inspect_report(project):
         "checks_passed": ["schema fields", "asset paths inside root", "asset SHA-256", "unique ids", "hierarchy acyclic with one root",
                           "rigid transforms (det +1, no scale/shear)", "steps: prerequisites ordered, each occurrence installed exactly once",
                           "inventory required quantities equal installed occurrences"]
-                         + (["supplement: every field explicit, quantities integer or null, included_with discriminated, attaches_to ids exist, status/kind rules"] if sup is not None else []),
+                         + (["supplement: every field explicit, quantities integer or null, included_with discriminated, attaches_to ids exist, status/kind rules"] if sup is not None else [])
+                         + (["build-scope: every field explicit, deferred occurrences exist, conditional groups are non-root assemblies with explicit decisions"] if bs is not None else []),
         "not_checked": ["STEP geometry validity (see cad_mesh.py receipt)", "insertion path or tool access", "physical assembly"],
     }
 
@@ -134,6 +145,10 @@ def print_report(rep, out=sys.stdout):
             req = "unknown" if r["confirmed_required_each"] is None else r["confirmed_required_each"]
             oh = "unknown" if r["on_hand_each"] is None else r["on_hand_each"]
             w(f"  {r['item_id'][:28]:28s} {r['scope']:10s} {r['item_kind']:6s} {r['status']:25s} joint {r['joint_id'][:24]:24s} required {req}, on hand {oh}, attaches to {r['attaches_to'] or 'nothing'}\n")
+    bs = rep.get("build_scope")
+    if bs:
+        w(f"build scope {bs['phase']!r}: {bs['title']} ({bs['review_state']}, decided by {bs['decided_by']}); {bs['this_build_total']} occurrence(s) in this build, "
+          f"{bs['conditional_occurrences']} conditional, {bs['deferred_occurrences_total']} deferred; parts deferred entirely: {len(bs['parts_deferred_entirely'])}; deferred steps {bs['deferred_steps']}\n")
     w("input hashes:\n")
     for k, v in rep["input_hashes"].items():
         w(f"  {v}  {k}\n")

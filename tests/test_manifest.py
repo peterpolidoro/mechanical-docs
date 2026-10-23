@@ -14,7 +14,7 @@ def test_fixture_loads_and_resolves_world_transforms(fixture_dir):
     assert T.translation(sc.occurrences["pin-b"].world) == [25, 0, 0]
     assert sc.occurrences["pin-a"].path == ["root", "pin-pair"]
     assert sc.assemblies["pin-pair"].depth == 1
-    assert len(pr.input_hashes()) == 6      # scene, instructions, inventory, supplement, two assets
+    assert len(pr.input_hashes()) == 7      # scene, instructions, inventory, supplement, build scope, two assets
     assert pr.inventory.items[1].counted is None
 
 
@@ -204,6 +204,7 @@ def _production_scene(project_copy):
     project_copy.edit("scene.json", f)
     (project_copy.dir / "instructions.json").unlink()
     (project_copy.dir / "supplement.json").unlink()      # its scene ids are the fixture's, not the production-style ones
+    (project_copy.dir / "build-scope.json").unlink()     # likewise
     inv = _json.loads((project_copy.dir / "inventory.json").read_text())
     for row in inv["items"]:
         row["part_id"] = "DATA\\COMMON\\" + row["part_id"] + ".ipt|[Primary]"
@@ -300,8 +301,8 @@ def FIXTURE_DIR_FOR_COINCIDENT():
 def test_render_input_hashes_exclude_inventory_and_supplement(fixture_dir):
     """A stock record or a supplement row never changes an image, so --reuse compares only the rest."""
     pr = load_project(fixture_dir)
-    assert set(pr.input_hashes()) - set(pr.render_input_hashes()) == {"inventory.json", "supplement.json"}
+    assert set(pr.input_hashes()) - set(pr.render_input_hashes()) == {"inventory.json", "supplement.json", "build-scope.json"}
     assert set(pr.render_input_hashes()) == {"scene.json", "instructions.json", "assets/base.step", "assets/pin.step"}
-    assert pr.non_render_inputs() == {"inventory.json", "supplement.json"}
+    assert pr.non_render_inputs() == {"inventory.json", "supplement.json", "build-scope.json"}      # the scope's step changes are caught per view
     # meshes depend on geometry only: scene and assets
     assert set(pr.geometry_input_hashes()) == {"scene.json", "assets/base.step", "assets/pin.step"}

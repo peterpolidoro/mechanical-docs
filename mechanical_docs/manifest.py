@@ -16,6 +16,13 @@ it is added to the scene's CAD counts. The inventory's optional stock fields
 (`on_hand_each` with `counted_by`/`counted_date`, `stock_location`,
 `intended_configuration_confirmed`) follow the same rules; the printed
 `counted` box is paper only and is not a data field.
+
+`build-scope.json` (schema_version 1, optional) scopes one build phase: the
+occurrences deferred from it, the assemblies whose installation is still
+undecided (conditional) and the phase's title and note. It never changes the
+scene or its CAD counts; it only labels what the documents print for the
+phase (this-build, conditional and deferred quantities, deferred and
+conditional steps).
 """
 from __future__ import annotations
 
@@ -66,6 +73,11 @@ SUPPLEMENT_SCOPES = ("existing", "new_design")
 SUPPLEMENT_ITEM_KINDS = ("family", "sku")
 SUPPLEMENT_STATUSES = ("candidate_requires_review", "not_required", "covered", "specified")
 INCLUDED_WITH_KINDS = ("scene_part", "kit")
+# build-scope.json: one build phase (contract from the Linux CAD agent, 2026-10-22)
+BUILD_SCOPE_SCHEMA_VERSION = 1
+BUILD_SCOPE_FIELDS = {"schema_version", "scene", "phase", "title", "decided_by", "review_state", "deferred_occurrence_ids",
+                      "conditional_groups", "backlight", "deferred_design", "note"}
+CONDITIONAL_FIELDS = {"id", "rule", "decided"}
 INCLUDED_WITH_FIELDS = {"scene_part": {"kind", "id"}, "kit": {"kind", "name"}}
 SCALAR = (str, int, float, bool, type(None))
 
@@ -310,12 +322,77 @@ class Supplement:
 
 
 @dataclass
+class ConditionalGroup:
+    id: str
+    rule: str
+    decided: bool | None     # True: in this build; False: deferred with its members; None: undecided (conditional)
+
+
+@dataclass
+class BuildScope:
+    phase: str
+    title: str
+    decided_by: str
+    review_state: str
+    deferred_occurrence_ids: list
+    conditional_groups: list
+    backlight: str
+    deferred_design: list
+    note: str
+    file: Path
+    sha256: str
+
+    def deferred_ids(self, scene):
+        """Occurrences out of this build: the listed ones and every member of a
+        conditional group decided against."""
+        out = list(self.deferred_occurrence_ids)
+        for g in self.conditional_groups:
+            if g.decided is False:
+                out += [o for o in scene.members(g.id) if o not in out]
+        return out
+
+    def conditional_ids(self, scene):
+        """Occurrences whose installation in this build is undecided: members of a
+        conditional group with `decided: null` that are not deferred outright."""
+        deferred = set(self.deferred_ids(scene))
+        out = []
+        for g in self.conditional_groups:
+            if g.decided is None:
+                out += [o for o in scene.members(g.id) if o not in deferred and o not in out]
+        return out
+
+    def classify(self, scene, occ_id):
+        if occ_id in self.deferred_ids(scene):
+            return "deferred"
+        if occ_id in self.conditional_ids(scene):
+            return "conditional"
+        return "build"
+
+    def conditional_group_of(self, scene, occ_id):
+        for g in self.conditional_groups:
+            if g.decided is None and occ_id in scene.members(g.id):
+                return g
+        return None
+
+    def part_quantities(self, scene):
+        """part id -> {cad, this_build, conditional, deferred} over installed occurrences."""
+        deferred = set(self.deferred_ids(scene)); conditional = set(self.conditional_ids(scene))
+        out = {}
+        for pid in scene.parts:
+            occs = scene.installed_occurrences_of(pid)
+            d = sum(1 for o in occs if o.id in deferred); c = sum(1 for o in occs if o.id in conditional)
+            out[pid] = {"cad": len(occs), "this_build": len(occs) - d - c, "conditional": c, "deferred": d}
+        return out
+
+
+@dataclass
 class Project:
     dir: Path
     scene: Scene
     instructions: Instructions | None
     inventory: Inventory
     supplement: Supplement | None = None
+    build_scope: BuildScope | None = None
 
     @property
     def has_instructions(self):
@@ -328,6 +405,8 @@ class Project:
         h[str(self.inventory.file.relative_to(self.dir))] = self.inventory.sha256
         if self.supplement is not None:
             h[str(self.supplement.file.relative_to(self.dir))] = self.supplement.sha256
+        if self.build_scope is not None:
+            h[str(self.build_scope.file.relative_to(self.dir))] = self.build_scope.sha256
         for p in self.scene.parts.values():
             h[str(p.asset.resolved.relative_to(self.dir))] = p.asset.sha256
         return h
@@ -336,9 +415,12 @@ class Project:
         """Manifest files that cannot change any rendered image: the inventory
         (quantities and stock records) and the supplement (rows not modelled in
         CAD). Everything else (scene, assets, instructions) can."""
-        names = {str(self.inventory.file.relative_to(self.dir)), "supplement.json"}
+        names = {str(self.inventory.file.relative_to(self.dir)), "supplement.json", "build-scope.json"}
         if self.supplement is not None:
             names.add(str(self.supplement.file.relative_to(self.dir)))
+        if self.build_scope is not None:
+            # the scope changes which steps accumulate; reuse.py compares each step's recorded state instead
+            names.add(str(self.build_scope.file.relative_to(self.dir)))
         return names
 
     def geometry_input_hashes(self):
@@ -476,7 +558,10 @@ class _Check:
             raise ManifestError(self.problems)
 
 
-def _load_json(path, chk, where):
+def _load_json(path, chk, where, schema_version=SCHEMA_VERSION):
+    """Parse a manifest file (a UTF-8 BOM is tolerated) and check its
+    schema_version: the draft-1 string for the scene, instructions and
+    inventory; an integer for the supplement and the build scope."""
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8-sig"))   # a UTF-8 BOM (PowerShell) is tolerated
     except FileNotFoundError:
@@ -488,8 +573,8 @@ def _load_json(path, chk, where):
     if not isinstance(data, dict):
         chk(False, f"{where}: top level must be an object")
         return None
-    if data.get("schema_version") != SCHEMA_VERSION:
-        chk(False, f"{where}: schema_version must be {SCHEMA_VERSION!r}, got {data.get('schema_version')!r}")
+    if data.get("schema_version") != schema_version:
+        chk(False, f"{where}: schema_version must be {schema_version!r}, got {data.get('schema_version')!r}")
     return data
 
 
@@ -986,8 +1071,63 @@ def load_supplement(path, scene: Scene, chk=None):
 
 # ------------------------------------------------------------------ project
 
+def load_build_scope(path, scene: Scene, chk=None):
+    """build-scope.json: one build phase. Deferred occurrence ids must exist;
+    conditional group ids must be non-root assemblies with a rule and an
+    explicit decision (true, false or null); unknown fields are refused."""
+    own = chk is None
+    chk = chk or _Check()
+    path = Path(path)
+    data = _load_json(path, chk, "build-scope", BUILD_SCOPE_SCHEMA_VERSION)
+    if data is None:
+        chk.raise_if_any()
+    chk.fields(data, BUILD_SCOPE_FIELDS, "build-scope")
+    for key in sorted(BUILD_SCOPE_FIELDS):
+        chk(key in data, f"build-scope: missing field {key!r} (every field is explicit)")
+    ref = data.get("scene")
+    if chk(isinstance(ref, str) and ref, "build-scope.scene: expected the scene file's path"):
+        # the project recipe writes the scene's path within its own repository; the file name must be the loaded scene's
+        chk((path.parent / ref).resolve() == scene.file.resolve() or Path(ref).name == scene.file.name,
+            f"build-scope.scene: {ref!r} does not name the loaded scene {scene.file.name!r}")
+    chk(valid_identifier(data.get("phase")) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", str(data.get("phase"))) is not None,
+        f"build-scope.phase: expected an identifier (letters, digits, . _ -), got {data.get('phase')!r}")
+    for key in ("title", "decided_by", "backlight", "note"):
+        chk(isinstance(data.get(key), str) and data.get(key).strip(), f"build-scope.{key}: expected a non-empty string")
+    chk(data.get("review_state") in REVIEW_STATES, f"build-scope.review_state: expected one of {REVIEW_STATES}, got {data.get('review_state')!r}")
+    deferred = data.get("deferred_occurrence_ids")
+    if not chk(isinstance(deferred, list) and all(isinstance(x, str) for x in deferred), "build-scope.deferred_occurrence_ids: expected a list of occurrence ids (may be empty)"):
+        deferred = []
+    for i, oid in enumerate(deferred):
+        chk(oid in scene.occurrences, f"build-scope.deferred_occurrence_ids[{i}]: unknown occurrence {oid!r}" + (" (an assembly id; list its occurrences or use conditional_groups)" if oid in scene.assemblies else ""))
+    chk(len(set(deferred)) == len(deferred), "build-scope.deferred_occurrence_ids: an occurrence is listed twice")
+    groups = []
+    raw_groups = data.get("conditional_groups")
+    if not chk(isinstance(raw_groups, list), "build-scope.conditional_groups: expected a list (may be empty)"):
+        raw_groups = []
+    seen = set()
+    for i, g in enumerate(raw_groups):
+        where = f"build-scope.conditional_groups[{i}]"
+        if not chk.fields(g, CONDITIONAL_FIELDS, where):
+            continue
+        for key in ("id", "rule", "decided"):
+            chk(key in g, f"{where}: missing field {key!r}")
+        gid = g.get("id")
+        chk(gid in scene.assemblies and gid != scene.root_id, f"{where}.id: {gid!r} is not a non-root assembly id in the scene")
+        chk(gid not in seen, f"{where}: {gid!r} listed twice"); seen.add(gid)
+        chk(isinstance(g.get("rule"), str) and g.get("rule").strip(), f"{where}.rule: expected a non-empty sentence")
+        chk(g.get("decided") in (True, False, None) and "decided" in g, f"{where}.decided: expected true, false or null")
+        groups.append(ConditionalGroup(str(gid), str(g.get("rule", "")), g.get("decided")))
+    dd = data.get("deferred_design")
+    if not chk(isinstance(dd, list) and all(isinstance(x, str) and x.strip() for x in dd), "build-scope.deferred_design: expected a list of strings (may be empty)"):
+        dd = []
+    if own:
+        chk.raise_if_any()
+    return BuildScope(str(data.get("phase", "")), str(data.get("title", "")), str(data.get("decided_by", "")), str(data.get("review_state", "")),
+                      list(deferred), groups, str(data.get("backlight", "")), list(dd), str(data.get("note", "")), path, sha256_file(path) if path.is_file() else "")
+
+
 def load_project(project_dir, scene="scene.json", instructions="instructions.json", inventory="inventory.json", root=None,
-                 require_instructions=False, supplement="supplement.json") -> Project:
+                 require_instructions=False, supplement="supplement.json", build_scope="build-scope.json") -> Project:
     """Load and validate a project directory: scene and inventory always, the
     instructions when the file exists (a project without a reviewed sequence
     still yields a parts inventory), the supplement when the file exists.
@@ -1005,8 +1145,9 @@ def load_project(project_dir, scene="scene.json", instructions="instructions.jso
         chk(False, f"instructions: file not found: {d / instructions}")
     inv = load_inventory(d / inventory, sc, chk)
     sup = load_supplement(d / supplement, sc, chk) if (d / supplement).exists() else None
+    bs = load_build_scope(d / build_scope, sc, chk) if (d / build_scope).exists() else None
     chk.raise_if_any()
-    return Project(d, sc, ins, inv, sup)
+    return Project(d, sc, ins, inv, sup, bs)
 
 
 def inventory_template(scene: Scene):

@@ -26,12 +26,13 @@ so the default printed document stays compact.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-from . import receipts
+from . import explode, receipts
 from .manifest import ManifestError, load_project
 from .names import slug
 from .procedure import derive_states
@@ -150,9 +151,183 @@ def part_details(part):
     return " · ".join(bits)
 
 
-def build_model(project, render_receipt, meshes_receipt=None, appendix=False):
-    sc, ins, inv = project.scene, project.instructions, project.inventory
-    states = derive_states(ins, sc) if ins is not None else []
+def definition_of(scene, aid):
+    """(display name, basis, document) of the subassembly definition an instance
+    belongs to: the exporter's `document` (the assembly file) names it when
+    recorded, otherwise the id's last segment without its `:N` instance suffix."""
+    asm = scene.assemblies[aid]
+    if asm.document:
+        base = asm.document.replace("\\", "/").split("/")[-1]
+        return (base.rsplit(".", 1)[0] if "." in base else base), "document", asm.document
+    return id_stem(aid), "id", None
+
+
+def id_stem(aid):
+    return re.sub(r":\d+$", "", aid.split("/")[-1])
+
+
+def definition_instances(scene, aid):
+    """(ids of every instance of the definition in scene order, finding or None).
+    Instances are grouped by `document` when it is recorded, else by id stem;
+    when the two groupings disagree the document grouping is used and the
+    finding records both."""
+    name, basis, doc = definition_of(scene, aid)
+    non_root = [a for a in scene.assemblies if a != scene.root_id]
+    by_stem = [a for a in non_root if id_stem(a) == id_stem(aid)]
+    if basis != "document":
+        return by_stem, None
+    by_doc = [a for a in non_root if scene.assemblies[a].document == doc]
+    finding = None if sorted(by_doc) == sorted(by_stem) else {"assembly": aid, "definition": name, "by_document": by_doc, "by_id_stem": by_stem}
+    return by_doc, finding
+
+
+def instance_detail(scene, inst):
+    """Content of one subassembly instance: part counts over every occurrence
+    under it, and whether anything may make its content differ from a sibling
+    instance (a flexible assembly, a position overridden against the definition)."""
+    members = scene.members(inst)
+    counts = {}
+    for oid in members:
+        counts[scene.occurrences[oid].part_id] = counts.get(scene.occurrences[oid].part_id, 0) + 1
+    flexible = bool(scene.assemblies[inst].flexible) or any(scene.occurrences[o].parent_flexible for o in members)
+    overridden = sum(1 for o in members if scene.occurrences[o].position_overridden)
+    return {"id": inst, "occurrences": len(members), "parts": counts, "flexible": flexible, "overridden": overridden}
+
+
+def content_notes(details):
+    """What may make an instance's content differ from a sibling's: a flexible
+    assembly, positions overridden against the definition. Printed as a note
+    whatever the instance count."""
+    notes = []
+    if any(d["flexible"] for d in details):
+        notes.append("flexible assembly: positions may differ per instance")
+    n_over = sum(d["overridden"] for d in details)
+    if n_over:
+        notes.append(f"{n_over} position(s) overridden against the definition")
+    return "; ".join(notes)
+
+
+def instances_identical(details):
+    """(identical, reason): with several instances, every one has the same part
+    set and quantities and none is flexible or has an overridden position; the
+    total for all instances is printed only then. One instance is identical to
+    itself (the site generator and the pages treat it so; Linux, 2026-10-23)."""
+    if len(details) <= 1:
+        return True, ""
+    reasons = []
+    if len({json.dumps(sorted(d["parts"].items())) for d in details}) > 1:
+        reasons.append("different parts or quantities")
+    notes = content_notes(details)
+    if notes:
+        reasons.append(notes)
+    return (not reasons), "; ".join(reasons)
+
+
+def union_box(hs, occ_ids):
+    """The union of the projected boxes of the listed occurrences in a hotspots
+    record, and whether every one of them was fully in frame."""
+    want = set(occ_ids)
+    boxes = [e for e in hs["occurrences"] if e["id"] in want]
+    if not boxes:
+        return None, False
+    x0 = min(b["box_px"][0] for b in boxes); y0 = min(b["box_px"][1] for b in boxes)
+    x1 = max(b["box_px"][2] for b in boxes); y1 = max(b["box_px"][3] for b in boxes)
+    return [round(x0, 1), round(y0, 1), round(x1, 1), round(y1, 1)], all(b["corners_in_frame"] == 8 for b in boxes)
+
+
+def anchor_px(hs, occ_ids):
+    """Where a callout badge sits: the centre of the largest fully-in-frame
+    projected box among the listed occurrences (a point on the geometry, where
+    the union box's corner may be empty space); None without hotspots."""
+    want = set(occ_ids)
+    boxes = [e for e in hs["occurrences"] if e["id"] in want and e["corners_in_frame"] == 8] or [e for e in hs["occurrences"] if e["id"] in want]
+    if not boxes:
+        return None
+    b = max(boxes, key=lambda e: (e["box_px"][2] - e["box_px"][0]) * (e["box_px"][3] - e["box_px"][1]))["box_px"]
+    return [round((b[0] + b[2]) / 2, 1), round((b[1] + b[3]) / 2, 1)]
+
+
+def exploded_model(sc, ev, groups, label_of, hs, image):
+    """The front page's exploded subassembly view: the recorded offsets and one
+    numbered callout per subassembly definition (the number is its page's),
+    placed on the instance whose projected box shows best (fully in frame,
+    then largest), plus one callout for the parts directly under the root."""
+    moved = {g["id"]: g["occurrence_ids"] for g in ev["groups"]}
+    callouts = []
+    for g in groups:
+        pick, box = g["id"], None
+        if hs is not None:
+            cands = []
+            for inst in g["instance_ids"]:
+                b, in_frame = union_box(hs, sc.members(inst))
+                if b:
+                    cands.append((in_frame, (b[2] - b[0]) * (b[3] - b[1]), inst, b))
+            if cands:
+                _, _, pick, box = max(cands)
+        callouts.append({"number": g["index"], "kind": "subassembly", "definition": g["definition"], "group_id": g["id"], "page_ref": f"group-{g['index']}",
+                         "instance_ids": g["instance_ids"], "instance_count": g["instance_count"], "instances_identical": g["instances_identical"],
+                         "callout_instance": pick, "other_instance_ids": [i for i in g["instance_ids"] if i != pick], "box_px": box,
+                         "anchor_px": anchor_px(hs, sc.members(pick)) if hs is not None else None})
+    root = moved.get(explode.ROOT_PARTS)
+    if root:
+        counts = {}
+        for oid in root:
+            counts[sc.occurrences[oid].part_id] = counts.get(sc.occurrences[oid].part_id, 0) + 1
+        callouts.append({"number": len(groups) + 1, "kind": "root-parts", "definition": "parts directly under the root", "group_id": explode.ROOT_PARTS, "page_ref": None,
+                         "instance_ids": [explode.ROOT_PARTS], "instance_count": 1, "instances_identical": True, "callout_instance": explode.ROOT_PARTS, "other_instance_ids": [],
+                         "occurrence_ids": list(root),
+                         "parts": [{"part_id": pid, "label": label_of[pid], "label_text": display_name(sc.parts[pid]), "qty": q} for pid, q in sorted(counts.items(), key=lambda kv: label_of[kv[0]])],
+                         "box_px": union_box(hs, root)[0] if hs is not None else None, "anchor_px": anchor_px(hs, root) if hs is not None else None})
+    paged = {inst for g in groups for inst in g["instance_ids"]}
+    without_page = [gid for gid in moved if gid != explode.ROOT_PARTS and gid not in paged]
+    return {"image": image, "view_id": "exploded", "width": ev.get("width"), "height": ev.get("height"),
+            "offsets_mm": ev["offsets_mm"], "spread": ev.get("spread"), "direction": ev.get("direction"),
+            "groups": [{"id": g["id"], "offset_mm": g["offset_mm"], "source": g["source"], "occurrences": len(g["occurrence_ids"])} for g in ev["groups"]],
+            "callouts": callouts, "without_page": without_page, "hotspots": "hotspots/exploded.json" if hs is not None else None,
+            "note": ev.get("note", "exploded illustration: the top-level groups moved apart by recorded offsets; not an assembly step")}
+
+
+def viewer_hotspots(sc, model, vr, hotspots):
+    """`viewer/hotspots.json` in the form agreed with the Linux CAD agent
+    (2026-10-23): the manual's subassembly numbers, each definition's instances
+    and shown instance, one anchor per state from the viewer receipt, and the
+    union boxes of the shown instance's occurrences in overview.png and
+    exploded.png. Linux generates the site pages from exactly these fields."""
+    ov = hotspots.get("overview"); ex = hotspots.get("exploded")
+    files = vr["files"]
+
+    def boxes(occ_ids):
+        return {"assembled": union_box(ov, occ_ids)[0] if ov else None, "exploded": union_box(ex, occ_ids)[0] if ex else None}
+
+    def anchors(gid):
+        a = vr["anchors"].get(gid)
+        if a is None:
+            raise DocumentError(f"viewer receipt has no anchor for {gid!r}; run viewer.py again")
+        return {"assembled": a["assembled"], "exploded": a["exploded"]}
+
+    states = {"assembled": {"glb": "viewer/assembled.glb", "triangles": files["assembled"]["triangles_instanced"], "offsets_mm": {}}}
+    if "exploded" in files:
+        states["exploded"] = {"glb": "viewer/exploded.glb", "triangles": files["exploded"]["triangles_instanced"], "offsets_mm": vr["offsets_mm"] or {}}
+    subs = [{"number": g["index"], "definition": g["definition"], "instance_ids": g["instance_ids"], "shown_instance": g["id"],
+             "instances_identical": g["instances_identical"], "anchors": anchors(g["id"]), "overview_box_px": boxes([o["id"] for o in g["occurrences"]])}
+            for g in model["groups"]]
+    root_ids = [oid for oid, occ in sc.occurrences.items() if occ.parent_id == sc.root_id]
+    root = None
+    if root_ids:
+        root = {"number": len(model["groups"]) + 1, "definition": "parts directly under root", "occurrence_ids": root_ids,
+                "anchors": anchors(explode.ROOT_PARTS), "overview_box_px": boxes(root_ids)}
+    return {"schema_version": 1, "frame": vr["frame"], "scene_id": sc.id, "manual_id": model["id"], "states": states,
+            "triangle_budget": vr["triangle_budget"], "subassemblies": subs, "root_parts": root}
+
+
+def build_model(project, render_receipt, meshes_receipt=None, appendix=False, hotspots=None, viewer=None):
+    """The document model. `hotspots`: view id -> the renderer's hotspots record
+    (projected boxes), used for the exploded view's callouts and the viewer data;
+    `viewer`: the viewer export's receipt, or None when no viewer data is built."""
+    hotspots = hotspots or {}
+    sc, ins, inv, bs = project.scene, project.instructions, project.inventory, project.build_scope
+    deferred_ids = bs.deferred_ids(sc) if bs is not None else []
+    states = derive_states(ins, sc, deferred_ids) if ins is not None else []
     views = {v["id"]: v for v in render_receipt["views"]}
     if render_receipt.get("partial"):
         raise DocumentError("render receipt is partial (--views without --reuse); render every view before building the manual")
@@ -169,9 +344,25 @@ def build_model(project, render_receipt, meshes_receipt=None, appendix=False):
             raise DocumentError(f"render receipt has no view {vid!r}")
         return views[vid]["file"]
 
+    # the step images must show the cumulative state the current build scope derives
+    for st in states:
+        rec = views.get(f"step-{st.index:02d}-{slug(st.step.id)}") or {}
+        if "highlighted" in rec and "subdued" in rec and (sorted(rec["highlighted"]) != sorted(st.added) or sorted(rec["subdued"]) != sorted(st.before)):
+            raise DocumentError(f"render receipt step {st.step.id!r} was rendered with a different installed-before set (the build scope changed); render again with --reuse")
+
+    quantities = bs.part_quantities(sc) if bs is not None else None
+
+    def scope_kind(pid):
+        if quantities is None:
+            return None
+        q = quantities[pid]
+        return "deferred" if q["this_build"] == 0 and q["conditional"] == 0 else ("conditional" if q["this_build"] == 0 else "build")
+
+    # parts in this build (or conditional) first, parts deferred entirely last: the printed order and the labels follow
+    ordered_items = [it for it in inv.items if scope_kind(it.part_id) != "deferred"] + [it for it in inv.items if scope_kind(it.part_id) == "deferred"]
     label_of = {}
     inventory = []
-    for n, item in enumerate(inv.items, 1):
+    for n, item in enumerate(ordered_items, 1):
         part = sc.parts[item.part_id]
         label_of[part.id] = n
         tv = views.get(f"part-{slug(part.id)}") or {}
@@ -197,8 +388,11 @@ def build_model(project, render_receipt, meshes_receipt=None, appendix=False):
                             if sc.coincident_of(part.id) else ""),
             "thumbnail": view_file(f"part-{slug(part.id)}"), "thumbnail_style": tv.get("style", "square"),
             "end_view": view_file(end_id) if end_id else None,
+            **({"this_build": quantities[part.id]["this_build"], "conditional": quantities[part.id]["conditional"], "deferred": quantities[part.id]["deferred"],
+                "scope_kind": scope_kind(part.id)} if quantities is not None else {}),
         })
     groups = []
+    definition_findings = []
     for v in render_receipt["views"]:
         if v.get("kind") != "group":
             continue
@@ -215,11 +409,24 @@ def build_model(project, render_receipt, meshes_receipt=None, appendix=False):
         if sorted(expected) != sorted(v["visible"]):
             raise DocumentError(f"render receipt view {v['id']} does not show every occurrence under {gid!r}")
         asm = sc.assemblies[gid]
+        # how many of this subassembly the project needs: every instance of its definition
+        definition, basis, document = definition_of(sc, gid)
+        instance_ids, finding = definition_instances(sc, gid)
+        if finding:
+            definition_findings.append(finding)
+        details = [instance_detail(sc, inst) for inst in instance_ids]
+        identical, differ_because = instances_identical(details)
+        n_inst = len(instance_ids)
         groups.append({
             "index": len(groups) + 1, "id": gid, "short_name": gid.split("/")[-1], "parent_id": asm.parent_id, "path": v.get("assembly_path", []),
             "depth": asm.depth, "flexible": asm.flexible, "image": view_file(v["id"]), "view_id": v["id"],
+            "definition": definition, "definition_basis": basis, "definition_document": document,
+            "instance_ids": instance_ids, "instance_count": n_inst, "shown_instance": gid, "other_instance_ids": [i for i in instance_ids if i != gid],
+            "instances_identical": identical, "instances_differ_because": differ_because, "instance_detail": details, "content_notes": content_notes(details),
+            "heading": f"{definition} ({n_inst} in this project)",
             "occurrences": [{"id": oid, "part_id": sc.occurrences[oid].part_id, "label": label_of[sc.occurrences[oid].part_id], "parent_id": sc.occurrences[oid].parent_id} for oid in v["visible"]],
             "parts": [{"part_id": pid, "label": label_of[pid], "name": sc.parts[pid].name, "label_text": display_name(sc.parts[pid]), "qty": q,
+                       "total_qty": q * n_inst if identical else None, "per_instance": [d["parts"].get(pid, 0) for d in details],
                        "thumbnail": view_file(f"part-{slug(pid)}")} for pid, q in sorted(counts.items(), key=lambda kv: label_of[kv[0]])],
             "poses": v.get("poses", "canonical"), "exploded": bool(v.get("exploded", False)),
             "note": v.get("note", "inspection view: occurrences at their CAD poses; not an assembly step"),
@@ -289,15 +496,40 @@ def build_model(project, render_receipt, meshes_receipt=None, appendix=False):
     }
     for g in groups:
         g.setdefault("hardware", [])
+    # the front page's exploded view: every occurrence moved exactly once, as a member of its top-level group
+    exploded = None
+    ev = next((v for v in render_receipt["views"] if v.get("kind") == "exploded"), None)
+    if ev is not None:
+        moved = [oid for g in ev["groups"] for oid in g["occurrence_ids"]]
+        if sorted(moved) != sorted(sc.occurrences) or len(moved) != len(sc.occurrences):
+            raise DocumentError("render receipt view 'exploded' does not move every occurrence exactly once")
+        for g in ev["groups"]:
+            for oid in g["occurrence_ids"]:
+                if explode.group_of(sc, oid) != g["id"]:
+                    raise DocumentError(f"render receipt view 'exploded': {oid!r} is listed under {g['id']!r} but belongs to {explode.group_of(sc, oid)!r}")
+        exploded = exploded_model(sc, ev, groups, label_of, hotspots.get("exploded"), view_file("exploded"))
     steps = []
-    for st in states:
+    # deferred steps print last, in a chapter of their own; the others keep their order
+    print_order = [st for st in states if not st.deferred] + [st for st in states if st.deferred]
+    for position, st in enumerate(print_order, 1):
         needed = []
         for pid, qty in st.parts_needed.items():
             needed.append({"part_id": pid, "label": label_of[pid], "name": sc.parts[pid].name, "qty": qty, "thumbnail": view_file(f"part-{slug(pid)}")})
         vid = f"step-{st.index:02d}-{slug(st.step.id)}"
         ap = st.step.approach
+        kind, rule, deferred_here = "build", None, []
+        if bs is not None:
+            kinds = {bs.classify(sc, o) for o in st.added}
+            if st.deferred:
+                kind = "deferred"
+            elif kinds == {"conditional"}:
+                kind = "conditional"
+                g = bs.conditional_group_of(sc, st.added[0])
+                rule = g.rule if g else None
+            deferred_here = [o for o in st.added if bs.classify(sc, o) == "deferred"] if kind == "build" else []
         steps.append({
-            "index": st.index, "id": st.step.id, "caption": st.step.caption, "requires": st.step.requires,
+            "index": position, "view_index": st.index, "kind": kind, "rule": rule, "deferred_occurrences": deferred_here,
+            "id": st.step.id, "caption": st.step.caption, "requires": st.step.requires,
             "add": st.added, "installed_before": st.before, "installed_after": st.after,
             "parts_needed": needed, "image": view_file(vid),
             "result_image": view_file(vid + "-result") if ap is not None else None,
@@ -305,6 +537,19 @@ def build_model(project, render_receipt, meshes_receipt=None, appendix=False):
                                                  "direction_text": approach_text(ap.start_offset)},
             "view": st.step.view,
         })
+    build_scope = None
+    if bs is not None:
+        totals = {k: sum(q[k] for q in quantities.values()) for k in ("cad", "this_build", "conditional", "deferred")}
+        build_scope = {
+            "phase": bs.phase, "title": bs.title, "decided_by": bs.decided_by, "review_state": bs.review_state, "note": bs.note,
+            "backlight": bs.backlight, "deferred_design": bs.deferred_design, "file": str(bs.file.relative_to(project.dir)), "sha256": bs.sha256,
+            "deferred_occurrence_ids": bs.deferred_occurrence_ids, "deferred_ids": deferred_ids, "conditional_ids": bs.conditional_ids(sc),
+            "conditional_groups": [{"id": g.id, "rule": g.rule, "decided": g.decided, "occurrences": len(sc.members(g.id))} for g in bs.conditional_groups],
+            "totals": totals, "parts_deferred": [r["part_id"] for r in inventory if r["scope_kind"] == "deferred"],
+            "checklist": [{"label": r["label"], "part_id": r["part_id"], "label_text": r["label_text"], "thumbnail": r["thumbnail"], "cad": r["required"],
+                           "this_build": r["this_build"], "conditional": r["conditional"], "deferred": r["deferred"], "scope_kind": r["scope_kind"]} for r in inventory],
+            "deferred_steps": [s["id"] for s in steps if s["kind"] == "deferred"], "conditional_steps": [s["id"] for s in steps if s["kind"] == "conditional"],
+        }
     source_summary = {k: v for k, v in sc.source.items() if k in ("kind", "generator", "qualification", "revision", "version", "root_version_id",
                                                                    "exported_at", "exporter", "occurrence_id_scope")}
     model = {
@@ -315,19 +560,25 @@ def build_model(project, render_receipt, meshes_receipt=None, appendix=False):
                   "parts": len(sc.parts), "occurrences": len(sc.occurrences), "assemblies": len(sc.assemblies)},
         "review_state": ins.review_state if ins is not None else "draft",
         "inventory_only": ins is None,
-        "status_lines": status_lines(project, render_receipt, bool(groups), bool(joints)),
-        "findings": {"coincident_occurrences": sc.coincident},
+        "status_lines": status_lines(project, render_receipt, bool(groups), bool(joints), definition_findings),
+        "findings": {"coincident_occurrences": sc.coincident, "definition_grouping": definition_findings},
         "project_notes": list(inv.notes),
         "inventory_status": inv.status,
         "cad_qty_note": CAD_QTY_NOTE, "count_box_note": COUNT_BOX_NOTE,
+        "build_scope": build_scope,
         "inventory": inventory,
         "overview_image": view_file("overview"),
+        "exploded_view": exploded,
+        "viewer": None if viewer is None else {"hotspots": "viewer/hotspots.json", "receipt": "viewer/viewer-receipt.json",
+                                               "files": {state: f"viewer/{state}.glb" for state in viewer["files"]}, "sha256": {state: f["sha256"] for state, f in viewer["files"].items()},
+                                               "triangle_budget": viewer["triangle_budget"], "triangles_instanced": viewer["triangles"]["instanced_total"],
+                                               "triangles_decimated_total": viewer["triangles"]["decimated_total"], "triangles_original_total": viewer["triangles"]["original_total"]},
         "groups": groups,
         "joints": joints,
         "supplement": supplement,
         "steps": steps,
         "appendix": bool(appendix),
-        "hotspots": {v["id"]: f"hotspots/{v['id']}.json" for v in render_receipt["views"] if v.get("kind") in ("overview", "group", "joint", "step", "step-result")},
+        "hotspots": {v["id"]: f"hotspots/{v['id']}.json" for v in render_receipt["views"] if v.get("kind") in ("overview", "exploded", "group", "joint", "step", "step-result")},
         "receipt": {
             "input_hashes": project.input_hashes(),
             "meshes": None if meshes_receipt is None else {"freecad_version": meshes_receipt.get("freecad_version"), "tessellation": meshes_receipt.get("tessellation"),
@@ -342,6 +593,8 @@ def build_model(project, render_receipt, meshes_receipt=None, appendix=False):
             "generator": {**receipts.python_info(), "package": "mechanical-docs"},
         },
     }
+    if viewer is not None:
+        model["viewer_hotspots"] = viewer_hotspots(sc, model, viewer, hotspots)
     return model
 
 
@@ -353,12 +606,22 @@ def approach_text(offset):
     return axes[best][0] if mags[best] > 0 else "in place"
 
 
-def status_lines(project, render_receipt, has_groups=False, has_joints=False):
-    ins, sc, inv, sup = project.instructions, project.scene, project.inventory, project.supplement
+def status_lines(project, render_receipt, has_groups=False, has_joints=False, definition_findings=()):
+    ins, sc, inv, sup, bs = project.instructions, project.scene, project.inventory, project.supplement, project.build_scope
     if ins is None:
         lines = ["Parts inventory and overview only: no assembly sequence has been authored or reviewed for this scene."]
     else:
-        lines = [f"Review state: {ins.review_state}. This sequence has not been physically validated."]
+        lines = [f"Review state: {ins.review_state}. This sequence has not been physically validated" + (" and the order is a draft to be corrected after the build." if ins.review_state == "draft" else ".")]
+    if bs is not None:
+        q = bs.part_quantities(sc)
+        n_total = sum(v["cad"] for v in q.values()); n_build = sum(v["this_build"] for v in q.values())
+        n_cond = sum(v["conditional"] for v in q.values()); n_def = sum(v["deferred"] for v in q.values())
+        lines.append(f"Build scope {bs.phase}: {bs.title} (decided by {bs.decided_by}; {bs.review_state}). {n_build} of {n_total} installed occurrences are in this build"
+                     + (f", {n_cond} conditional (undecided)" if n_cond else "") + (f", {n_def} deferred" if n_def else "") + "; CAD counts are unchanged and the deferred items stay in the model.")
+        lines.append(f"Phase note: {bs.note}")
+        lines.append(f"Backlight: {bs.backlight}")
+        if bs.deferred_design:
+            lines.append("Deferred design: " + "; ".join(bs.deferred_design) + ".")
     if sc.source.get("kind", "").startswith("autodesk-inventor"):
         lines.append("Geometry and hierarchy come from the CAD export named in the build record. "
                      "Quantities are CAD instance counts, not purchase quantities, kits, stock or an approved bill of materials.")
@@ -374,6 +637,9 @@ def status_lines(project, render_receipt, has_groups=False, has_joints=False):
         lines.append(f"Supplementary items ({len(sup.items)} rows, {len(sup.items) - n_new} for the existing design"
                      + (f", {n_new} for new design in the appendix only" if n_new else "") + ") are hardware not modelled in CAD: "
                      "listed separately for review, never added to CAD quantities, unknown quantities left unknown; not an approved bill of materials.")
+    if definition_findings:
+        lines.append(f"CAD ambiguity: {len(definition_findings)} subassembly definition(s) group differently by document and by id "
+                     f"({'; '.join(f['definition'] for f in definition_findings)}); the document grouping is printed, review the instance counts.")
     if sc.coincident:
         names = sorted({sc.parts[c["part_id"]].name for c in sc.coincident})
         lines.append(f"CAD ambiguity: {len(sc.coincident)} pair(s) of occurrences of the same part share one position ({'; '.join(names)}). "
@@ -395,6 +661,8 @@ def status_lines(project, render_receipt, has_groups=False, has_joints=False):
 def model_images(model):
     names = {row["thumbnail"] for row in model["inventory"]} | {row["end_view"] for row in model["inventory"] if row["end_view"]}
     names |= {model["overview_image"]} | {g["image"] for g in model["groups"]} | {j["image"] for j in model["joints"]}
+    if model.get("exploded_view"):
+        names.add(model["exploded_view"]["image"])
     names |= {s["image"] for s in model["steps"]} | {s["result_image"] for s in model["steps"] if s["result_image"]}
     return sorted(names)
 
@@ -414,6 +682,26 @@ def stage_images(model, renders_dir, out_dir):
         hs_dst = Path(out_dir) / "hotspots"; hs_dst.mkdir(exist_ok=True)
         for p in hs_src.glob("*.json"):
             shutil.copyfile(p, hs_dst / p.name)
+    return staged
+
+
+def stage_viewer(model, renders_dir, out_dir, vr):
+    """Copy the viewer GLBs (hash-checked against the viewer receipt) and the
+    receipt beside the manual, and write viewer/hotspots.json from the model."""
+    if vr is None:
+        return {}
+    dst = Path(out_dir) / "viewer"; dst.mkdir(parents=True, exist_ok=True)
+    staged = {}
+    for state, f in vr["files"].items():
+        src = Path(renders_dir) / f["path"]
+        if not src.is_file() or receipts.sha256_file(src) != f["sha256"]:
+            raise DocumentError(f"viewer file {src} is missing or differs from its receipt; run viewer.py again")
+        shutil.copyfile(src, dst / f"{state}.glb")
+        staged[f"viewer/{state}.glb"] = receipts.file_entry(dst / f"{state}.glb", out_dir)
+    shutil.copyfile(Path(renders_dir) / "viewer" / "viewer-receipt.json", dst / "viewer-receipt.json")
+    receipts.write_json(dst / "hotspots.json", model["viewer_hotspots"])
+    staged["viewer/hotspots.json"] = receipts.file_entry(dst / "hotspots.json", out_dir)
+    staged["viewer/viewer-receipt.json"] = receipts.file_entry(dst / "viewer-receipt.json", out_dir)
     return staged
 
 
@@ -445,10 +733,16 @@ def build(args):
         return 2
     rr = receipts.read_json(rr_path)
     mr = receipts.read_json(args.meshes) if args.meshes else None
+    hotspots = {p.stem: receipts.read_json(p) for p in sorted((renders / "hotspots").glob("*.json"))} if (renders / "hotspots").is_dir() else {}
+    vr_path = renders / "viewer" / "viewer-receipt.json"
+    vr = receipts.read_json(vr_path) if vr_path.is_file() else None
     try:
-        model = build_model(project, rr, mr, appendix=getattr(args, "appendix", False))
+        if vr is not None and (vr.get("kind") != "mechanical-docs-viewer-receipt" or vr.get("render_receipt", {}).get("sha256") != receipts.sha256_file(rr_path)):
+            raise DocumentError(f"{vr_path} was not made from {rr_path}; run viewer.py again")
+        model = build_model(project, rr, mr, appendix=getattr(args, "appendix", False), hotspots=hotspots, viewer=vr)
         out.mkdir(parents=True, exist_ok=True)
         staged = stage_images(model, renders, out)
+        viewer_files = stage_viewer(model, renders, out, vr)
     except DocumentError as e:
         print(f"manual: {e}", file=sys.stderr)
         return 2
@@ -466,6 +760,8 @@ def build(args):
         "project_dir": str(project.dir), "input_hashes": project.input_hashes(),
         "render_receipt": receipts.file_entry(rr_path), "meshes_receipt": receipts.file_entry(args.meshes) if args.meshes else None,
         "appendix_printed": model["appendix"], "groups": [g["id"] for g in model["groups"]], "joints": [j["joint_id"] for j in model["joints"]],
+        "exploded_view": None if not model.get("exploded_view") else {"offsets_mm": model["exploded_view"]["offsets_mm"], "callouts": [(c["number"], c["group_id"]) for c in model["exploded_view"]["callouts"]]},
+        "viewer": viewer_files or None,
         "supplement_rows": len(model["supplement"]["rows"]),
         "outputs": {"manual.json": receipts.file_entry(out / "manual.json", out), "index.html": receipts.file_entry(out / "index.html", out),
                     "manual.typ": receipts.file_entry(typ_path, out), "images": staged},

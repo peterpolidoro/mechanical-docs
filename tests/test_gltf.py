@@ -64,3 +64,35 @@ def test_writer_rejects_bad_input(tmp_path):
         gltf.write_glb(tmp_path / "a.glb", [(0, 0, 0)] * 3, [(0, 0, 1)] * 3, [0, 1, 5])
     with pytest.raises(ValueError):
         gltf.write_glb(tmp_path / "a.glb", [(0, 0, 0)] * 3, [(0, 0, 1)] * 3, [0, 1])
+
+
+def test_scene_glb_shares_meshes_through_nodes(tmp_path):
+    v, idx = unit_cube()
+    pos = [gltf.to_gltf_frame(p, 0.001) for p in v]
+    nrm = [(0.0, 1.0, 0.0)] * len(pos)
+    from mechanical_docs import transforms as T
+    m_a = gltf.frame_matrix_gltf(T.translate(0.0, 0.0, 0.0)); m_b = gltf.frame_matrix_gltf(T.translate(0.1, 0.2, 0.3))
+    nodes = [{"name": "G:1", "mesh": None, "matrix": None, "children": [1, 2]},
+             {"name": "G:1/cube:1", "mesh": 0, "matrix": m_a, "children": []},
+             {"name": "G:1/cube:2", "mesh": 0, "matrix": m_b, "children": []}]
+    path = tmp_path / "scene.glb"
+    size = gltf.write_scene_glb(path, [{"name": "cube", "positions": pos, "normals": nrm, "indices": idx}], nodes, [0], extras={"state": "assembled"})
+    assert path.stat().st_size == size
+    doc, binary = gltf.read_glb(path)
+    assert [n["name"] for n in doc["nodes"]] == ["G:1", "G:1/cube:1", "G:1/cube:2"] and doc["nodes"][0]["children"] == [1, 2]
+    assert len(doc["meshes"]) == 1 and doc["nodes"][1]["mesh"] == doc["nodes"][2]["mesh"] == 0
+    assert doc["materials"][0]["name"] == "flat" and doc["meshes"][0]["primitives"][0]["material"] == 0
+    assert doc["asset"]["extras"] == {"state": "assembled"} and doc["scenes"][0]["nodes"] == [0]
+    # a scene translation (x, y, z) in metres becomes glTF (x, z, -y) in the node matrix's last column
+    assert m_b[12:15] == pytest.approx([0.1, 0.3, -0.2]) and m_b[0] == m_b[5] == m_b[10] == m_b[15] == 1
+    # the single-mesh reader still reads the first primitive
+    p2, n2, i2 = gltf.read_mesh(path)
+    assert i2 == idx and len(p2) == len(v)
+
+
+def test_frame_matrix_keeps_rotations_rigid():
+    from mechanical_docs import transforms as T
+    m = gltf.frame_matrix_gltf(T.rotation_z(90))
+    # a rotation about scene +Z becomes a rotation about glTF +Y (column-major): x -> y in the scene is x -> -z in glTF
+    col0 = m[0:3]
+    assert col0 == pytest.approx([0.0, 0.0, -1.0], abs=1e-12)

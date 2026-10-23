@@ -23,17 +23,23 @@ class StepState:
     after: list = field(default_factory=list)     # before + added
     hidden: list = field(default_factory=list)    # occurrences of later steps
     parts_needed: dict = field(default_factory=dict)   # part id -> count added in this step
+    deferred: bool = False        # every addition is out of the build scope: shown, but not accumulated by later steps
 
 
 class ProcedureError(ValueError):
     pass
 
 
-def derive_states(instructions: Instructions, scene: Scene):
+def derive_states(instructions: Instructions, scene: Scene, deferred=()):
     """One StepState per step, in order. Raises ProcedureError on a prerequisite
     the order does not satisfy or a repeated installation (the loader rejects
-    these too; this guards callers that build Instructions themselves)."""
+    these too; this guards callers that build Instructions themselves).
+    `deferred`: occurrence ids out of the build scope; a step adding only those
+    is a deferred step: its own image shows them seated on the build so far,
+    but later steps do not count them as installed."""
+    deferred = set(deferred)
     installed = []
+    placed = set()
     done = set()
     states = []
     all_ids = list(scene.occurrences)
@@ -41,22 +47,26 @@ def derive_states(instructions: Instructions, scene: Scene):
         missing = [r for r in step.requires if r not in done]
         if missing:
             raise ProcedureError(f"step {step.id!r} requires {missing} which have not been completed in order")
-        dup = [o for o in step.add if o in installed]
+        dup = [o for o in step.add if o in placed]
         if dup:
             raise ProcedureError(f"step {step.id!r} installs {dup} again")
         unknown = [o for o in step.add if o not in scene.occurrences]
         if unknown:
             raise ProcedureError(f"step {step.id!r} adds unknown occurrence(s) {unknown}")
         before = list(installed)
-        installed = installed + list(step.add)
+        is_deferred = bool(step.add) and all(o in deferred for o in step.add)
+        if not is_deferred:
+            installed = installed + list(step.add)
         done.add(step.id)
         needed = {}
         for oid in step.add:
             pid = scene.occurrences[oid].part_id
             needed[pid] = needed.get(pid, 0) + 1
-        st = StepState(i, step, before, list(step.add), list(installed), [o for o in all_ids if o not in installed], needed)
+        after = before + list(step.add)
+        st = StepState(i, step, before, list(step.add), after, [o for o in all_ids if o not in after], needed, is_deferred)
         states.append(st)
-    left = [o for o in all_ids if o not in installed]
+        placed.update(step.add)
+    left = [o for o in all_ids if o not in placed]
     if left:
         raise ProcedureError(f"occurrence(s) never installed: {left}")
     return states

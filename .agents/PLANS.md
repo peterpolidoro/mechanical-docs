@@ -7,7 +7,104 @@ CAD geometry and structured procedures, using open-source tools. First deliver
 one useful small example as HTML and PDF, then process the enclosure's accepted
 STEP/assembly exports when available.
 
-## Current checkpoint — 2026-10-22, second packet (supplementary items, stock record, joint close-ups)
+## Current checkpoint — 2026-10-23 (Peter's manual review, front page, site viewer data, phase-1 scope)
+
+Linux message `to-documentation/20261023T140613Z-…` (Peter reviewed the
+supplement-03 manual: "looks pretty good" plus the items below) and the
+phase-1 assignment `20261022T185753Z-…`. Order fixed by Linux: A, then B,
+then C, then phase 1; a reply after each stage. Everything stays `draft`; no
+assembly order is asserted anywhere.
+
+- [x] A1 "counted" label clipped on every PDF card: the label now sits beside
+  the box in a horizontal stack (never wrapped under it), the card's rows are
+  spaced by the explicit gaps only (default paragraph/block spacing overflowed
+  the fixed 84 mm and the clip cut the quantity row), and the text box grew to
+  20 mm so six 7.5 pt lines fit (the tank card's two-line coincident note and
+  the "14 bodies" card checked at 110 and 300 dpi). The HTML card keeps its
+  label under the box (confirmed in the markup, no change).
+- [x] A2 subassembly instance counts: every group page states the definition
+  (from the exporter's `document`, else the id stem) and how many instances
+  the project has ("CASTER ASSEMBLY (4 in this project)"), lists the shown and
+  the other instance ids, adds a "for all N" column when the instances are
+  identical in content (same part set and quantities, none flexible or
+  position-overridden; otherwise "each instance" lists every instance's count
+  and the page says why they differ); `manual.json` carries `definition`,
+  `definition_basis`, `definition_document`, `instance_ids`, `instance_count`,
+  `instances_identical`, `instance_detail`; a document/id-stem grouping
+  disagreement is a finding on the status block; `check` compares the counts
+  in HTML (`data-instance-count`) and PDF ("(N in this project)" tokens).
+  Enclosure rebuilt from the existing renders: caster, panel and toggle-clamp
+  definitions 4 instances each with totals, tank support frame 2, camera and
+  free-standing frames 1 (flexible, overridden positions: no total needed).
+- [x] B front page: the overview follows the status block on page 1
+  (height-limited so it shares the page); page 2 draws the subassemblies
+  apart. `render.json` `exploded_view` (`enabled` true/false/auto, `direction`,
+  `spread` default 0.8, `fill`, `groups[].offset_mm` overrides; `explode.py`):
+  every child assembly of the root with all its occurrences, and the parts
+  directly under the root as `root-parts`, move as rigid bodies along the line
+  from the root bounds centre to their own centre by `spread` times that
+  distance (at least their own width along the line; a large concentric group
+  stays as the reference, a small one lifts). Offsets recorded in the receipt
+  with their source and in `hotspots/exploded.json`; `reuse.py` re-renders the
+  view when they change. Callouts: one per subassembly definition (its page
+  number) on the instance that shows best, at the centre of its largest
+  occurrence box; the root parts as the next number; PDF badges placed in mm
+  with a key whose page numbers come from Typst labels and are checked back
+  against the heading pages; HTML callouts and key link to the sections.
+  Fixture first (pins lift 30 mm, base drops 11 mm under its spread 1.0),
+  then the enclosure (one 1600 px view with `--reuse`, no outlines over the
+  600 000 budget like the overview).
+- [x] C viewer data: `viewer.py` (bpy) writes `renders/viewer/assembled.glb`
+  and `exploded.glb` (metres, +Y up, one mesh per part shared through nodes,
+  node names = occurrence ids, one parent node per subassembly instance
+  nested as in the scene, `root-parts`, one flat material; collapse
+  decimation to a 200 000-triangle budget per file with small parts kept
+  whole and normals split at 30°; `gltf.write_scene_glb`) and a receipt with
+  per-part counts, hashes, the offsets and one anchor per instance in both
+  states (bounds centre projected onto the nearest surface with its normal).
+  `manual` copies the GLBs hash-checked and writes `viewer/hotspots.json` in
+  the schema agreed with Linux; `manual.json` gains `exploded_view` and
+  `viewer`; `check` verifies files, hashes, numbers and anchors. Linux
+  generates the site pages from these; the page generator stays theirs.
+- [x] Phase 1 contract: `build-scope.json` (schema 1; `phase`, `title`,
+  `decided_by`, `review_state`, `deferred_occurrence_ids`, `conditional_groups`
+  `{id, rule, decided}`, `backlight`, `deferred_design`, `note`; unknown fields
+  refused; the recipe's own scene path accepted by file name) loaded with the
+  manifests and hashed into every receipt. Every installed occurrence is in
+  this build, conditional or deferred; cards print the this-build quantity as
+  the large number with the CAD count and the conditional/deferred shares
+  beside it, parts with nothing in the build move to a "Deferred (not in this
+  build)" section; a one-page verification checklist lists every part with
+  blank count/by/date/location/missing boxes; a step adding only deferred
+  occurrences prints in a final "Deferred steps" chapter and is not
+  accumulated by later steps, a step adding only conditional occurrences
+  prints CONDITIONAL with its rule, a build step names its deferred
+  additions; the status block states the phase, the counts, the note, the
+  backlight sentence and the deferred design items. The scope is a
+  non-render input: `reuse.py` re-renders a step whose additions or
+  installed-before set changed, and the overview and steps when the
+  instructions changed, while the thumbnails, groups, joints and exploded
+  view are reused. `check` verifies the partition of the CAD counts, the
+  checklist, the step chapters and the PDF tokens. Fixture: pin B deferred.
+- [x] Step images ghost what is already installed (`step_context_alpha`,
+  default 0.3: the flat context colour over transparency) because the first
+  phase-1 render hid every addition behind the hung panels from step 13 on;
+  joint close-ups keep their opaque faded context. A step with many part
+  types shrinks its parts-needed pictures so the column stays on the page.
+- [x] Phase 1 build: the Linux overlay of 2026-10-22 18:57 (`instructions.json`
+  with 18 draft steps, `build-scope.json`) staged in the ignored enclosure copy
+  and validated (110 of 155 installed occurrences in this build, 42
+  conditional, 3 deferred; one part deferred entirely; one deferred step, two
+  conditional). Rendered with `--reuse` on the front-page receipt: the overview
+  (now the first step's camera) and the 18 step images, 67 views reused
+  (308 s); the steps once more with the installed parts ghosted (289 s, 68
+  reused). Compact PDF 59 pages, appendix 77 pages, 33 checks passed each,
+  none failed. The reply carries a bounding-box reading of the draft order
+  (the camera frame needs a side entry before the panels; the conditional tank
+  support frames cannot go in after the panels, the camera frame and the top
+  panel) for Peter to confirm at the bench.
+
+## Previous checkpoint — 2026-10-22, second packet (supplementary items, stock record, joint close-ups)
 
 Decisions from the Linux CAD agent (`to-documentation/20261022T161838Z-…`),
 implemented against the three-part fixture first as asked; the enclosure build
@@ -284,6 +381,27 @@ done while Peter was away; all output stays `draft`.
   project team's; the fixtures prove tooling, not an enclosure procedure.
 
 ## Verification and handoff
+
+Review packet of 2026-10-23, observed on the same host and tools (bpy 4.5.14
+Cycles, Typst 0.15.0, Poppler 22.09): 124 pure-Python tests pass (2
+FreeCAD-gated skipped in the base role). Stage A rebuilt both enclosure
+manuals from the 18:38 receipt (compact 37 pages, appendix 54, 25 checks
+passed each); the cards and a subassembly page inspected at 110 and 300 dpi.
+Stages B and C: the fixture's exploded view (51 s) and viewer export
+(two 34 kB GLBs), then one enclosure view with `--reuse` (52 s, 2 436 488
+visible triangles, no outlines, 67 reused), viewer export in 4 s
+(475 641 to 202 791 triangles, two 7.2 MB GLBs, 17 anchors); compact 39
+pages, appendix 56, 28 checks passed each; the front pages inspected.
+Phase 1: 19 views in 308 s then 18 ghosted steps in 289 s; compact 59
+pages, appendix 77, 33 checks passed each; the status block, the deferred
+parts section, the checklist page, three step pages and the contact sheets
+of all 18 steps inspected by eye. Evidence runs
+`evidence/2026-10-23-documentation-manual-fixes-01/`,
+`…-front-page-and-viewer-01/`, `…-phase-1-01/`; replies in `to-linux/`
+(14:48, 15:15 and the phase-1 reply); `status/documentation.json` refreshed
+after each. Not run: the GLBs in a browser, a browser print test, a
+technician review, any physical build. The working tree is Peter's 7e4cbef
+plus these changes, uncommitted.
 
 Third enclosure build, observed on 2026-10-22: overlay verified against its
 SHA256SUMS; `reuse.py` re-rendered exactly the one view whose context changed

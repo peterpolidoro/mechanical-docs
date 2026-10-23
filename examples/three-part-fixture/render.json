@@ -5,12 +5,24 @@
     "base": "aluminium",
     "pin": "blue-anodized"
   },
-  "inspection_groups": ["pin-pair"],
+  "inspection_groups": [
+    "pin-pair"
+  ],
   "joint_views": [
     {
       "joint_id": "pin_to_base",
-      "occurrence_ids": ["pin-a", "base-1"],
-      "direction": [1.0, -1.2, 0.8]
+      "occurrence_ids": [
+        "pin-a",
+        "base-1"
+      ],
+      "direction": [
+        1.0,
+        -1.2,
+        0.8
+      ]
     }
-  ]
+  ],
+  "exploded_view": {
+    "spread": 1.0
+  }
 }

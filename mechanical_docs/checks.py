@@ -29,12 +29,17 @@ class _Html(HTMLParser):
     def __init__(self):
         super().__init__()
         self.inventory = []     # (part, required, label)
+        self.this_build = []    # (part, this-build qty) on scoped cards
+        self.step_kinds = []    # (step id, kind)
+        self.checklist = []     # (part, this-build qty) in the verification checklist
         self.steps = []         # (id, index)
         self.needed = []        # (step id, part, qty)
         self.groups = []        # (group id, index)
+        self.group_instances = []   # (group id, instance count, identical)
         self.group_parts = []   # (group id, part, qty)
         self.joints = []        # (joint id, index)
         self.sup_rows = []      # (item id, scope, status) in the supplementary table
+        self.callouts = []      # (number, group id) in the exploded view's key
         self.hardware = []      # (kind, group/joint key, item id) from the per-group and per-joint lists
         self.images = []
         self.links = []
@@ -48,16 +53,25 @@ class _Html(HTMLParser):
             self.ids.add(a["id"])
         if "data-part" in a and "data-required" in a:
             self.inventory.append((a["data-part"], int(a["data-required"]), int(a.get("data-label", 0))))
+            if "data-this-build" in a:
+                self.this_build.append((a["data-part"], int(a["data-this-build"])))
+        if tag == "tr" and "data-check-part" in a:
+            self.checklist.append((a["data-check-part"], int(a["data-this-build"])))
         if tag == "section" and "data-step" in a:
             self._step = a["data-step"]
             self.steps.append((a["data-step"], int(a["data-index"])))
+            self.step_kinds.append((a["data-step"], a.get("data-kind", "build")))
         if tag == "section" and "data-group" in a:
             self._group = a["data-group"]
             self.groups.append((a["data-group"], int(a["data-index"])))
+            if "data-instance-count" in a:
+                self.group_instances.append((a["data-group"], int(a["data-instance-count"]), a.get("data-identical") == "true"))
         if tag == "tr" and "data-gpart" in a and self._group:
             self.group_parts.append((self._group, a["data-gpart"], int(a["data-qty"])))
         if tag == "section" and "data-joint" in a:
             self.joints.append((a["data-joint"], int(a["data-index"])))
+        if tag == "tr" and "data-callout" in a:
+            self.callouts.append((int(a["data-callout"]), a.get("data-callout-target")))
         if tag == "tr" and "data-sitem" in a and "data-scope" in a:
             self.sup_rows.append((a["data-sitem"], a["data-scope"], a.get("data-status")))
         if tag == "li" and "data-sgroup" in a:
@@ -100,7 +114,13 @@ def run(args):
     ref_groups = [(g["id"], g["index"]) for g in model.get("groups", [])]
     ref_gparts = [(g["id"], p["part_id"], p["qty"]) for g in model.get("groups", []) for p in g["parts"]]
     ref_joints = [(j["joint_id"], j["index"]) for j in model.get("joints", [])]
+    ref_ginst = [(g["id"], g["instance_count"], g["instances_identical"]) for g in model.get("groups", []) if "instance_count" in g]
     sup = model.get("supplement") or {"present": False, "rows": [], "existing": [], "new_design": [], "by_group": {}, "by_joint": {}}
+    scope = model.get("build_scope")
+    ref_this = [(r["part_id"], r["this_build"]) for r in model["inventory"]] if scope else []
+    ref_kinds = [(s["id"], s.get("kind", "build")) for s in model["steps"]]
+    exploded = model.get("exploded_view")
+    ref_callouts = [(c["number"], c["group_id"]) for c in (exploded or {}).get("callouts", [])]
     ref_sup = [(r["item_id"], r["scope"], r["status"]) for r in sup["rows"] if not r["appendix_only"]]
     ref_hw = [("group", g, i) for g, items in sup["by_group"].items() for i in items] + [("joint", j, i) for j, items in sup["by_joint"].items() for i in items]
     # a subassembly's part quantities can never exceed the whole scene's
@@ -117,6 +137,15 @@ def run(args):
     else:
         check("manual.json: parts needed over all steps equal required quantities", "not-run", "no steps: inventory-only document")
     check("manual.json: step indices are 1..N in order", "passed" if [i for _, i in ref_steps] == list(range(1, len(ref_steps) + 1)) else "failed")
+    if scope:
+        # the phase quantities partition the CAD count, the checklist lists every part in card order, deferred steps come last
+        bad = [r["part_id"] for r in model["inventory"] if r["this_build"] + r["conditional"] + r["deferred"] != r["required"]]
+        order_ok = [c["part_id"] for c in scope["checklist"]] == [r["part_id"] for r in model["inventory"]]
+        kinds = [s.get("kind") for s in model["steps"]]
+        deferred_last = kinds == [k for k in kinds if k != "deferred"] + [k for k in kinds if k == "deferred"]
+        check("manual.json: build-scope quantities partition the CAD counts, checklist and step chapters agree", "passed" if not bad and order_ok and deferred_last else "failed",
+              {"parts not partitioned": bad, "checklist order": order_ok, "deferred steps last": deferred_last} if bad or not order_ok or not deferred_last
+              else f"{scope['totals']} ; {len(scope['parts_deferred'])} part(s) deferred entirely, {len(scope['deferred_steps'])} deferred step(s), {len(scope['conditional_steps'])} conditional")
     if sup["present"]:
         # supplementary quantities are their own list: none is a CAD part row, and every printed row keeps null as unknown
         cad_ids = {r["part_id"] for r in model["inventory"]}
@@ -131,10 +160,17 @@ def run(args):
     p = _Html(); p.feed(html_path.read_text(encoding="utf-8"))
     check("HTML inventory rows match manual.json", "passed" if p.inventory == ref_inv else "failed", {"html": p.inventory, "ref": ref_inv})
     check("HTML step order matches manual.json", "passed" if p.steps == ref_steps else "failed", {"html": p.steps, "ref": ref_steps})
+    if scope:
+        check("HTML this-build quantities, checklist and step kinds match manual.json", "passed" if p.this_build == ref_this and p.checklist == ref_this and p.step_kinds == ref_kinds else "failed",
+              {"cards": p.this_build, "checklist": p.checklist, "kinds": p.step_kinds, "ref": ref_this, "ref kinds": ref_kinds})
     check("HTML parts-needed per step match manual.json", "passed" if p.needed == ref_needed else "failed", {"html": p.needed, "ref": ref_needed})
     check("HTML subassembly sections match manual.json", "passed" if p.groups == ref_groups and p.group_parts == ref_gparts else "failed",
           {"html": [p.groups, p.group_parts], "ref": [ref_groups, ref_gparts]})
     check("HTML joint sections match manual.json", "passed" if p.joints == ref_joints else "failed", {"html": p.joints, "ref": ref_joints})
+    if ref_ginst:
+        check("HTML subassembly instance counts match manual.json", "passed" if p.group_instances == ref_ginst else "failed", {"html": p.group_instances, "ref": ref_ginst})
+    if exploded:
+        check("HTML exploded-view callouts match manual.json", "passed" if p.callouts == ref_callouts else "failed", {"html": p.callouts, "ref": ref_callouts})
     if sup["present"]:
         check("HTML supplementary rows match manual.json", "passed" if p.sup_rows == ref_sup else "failed", {"html": p.sup_rows, "ref": ref_sup})
         check("HTML per-group and per-joint hardware lists match manual.json", "passed" if sorted(p.hardware) == sorted(ref_hw) else "failed", {"html": p.hardware, "ref": ref_hw})
@@ -166,10 +202,19 @@ def run(args):
         ids_in_pdf = [i for i in ids_in_pdf if i in {s for s, _ in ref_steps}]
         check("PDF step headings are 1..N in order", "passed" if steps_in_pdf == [i for _, i in ref_steps] else "failed", {"pdf": steps_in_pdf, "ref": [i for _, i in ref_steps]})
         check("PDF step ids in manual.json order", "passed" if ids_in_pdf == [s for s, _ in ref_steps] else "failed", {"pdf": ids_in_pdf, "ref": [s for s, _ in ref_steps]})
-        req_in_pdf = [int(m) for m in re.findall(r"CAD qty (\d+) ", text)]
+        req_in_pdf = [int(m) for m in re.findall(r"CAD qty (\d+)\b", text)]       # the small text may wrap right after the number
         check("PDF CAD quantities match manual.json", "passed" if req_in_pdf == [r for _, r, _ in ref_inv] else "failed", {"pdf": req_in_pdf, "ref": [r for _, r, _ in ref_inv]})
+        if scope:
+            this_in_pdf = [int(m) for m in re.findall(r"this build (\d+)\b", text)]
+            headings = ("Verification checklist" in text) and (("Deferred steps (not in this build)" in text) == bool(scope["deferred_steps"])) and (("Deferred (not in this build)" in text) == bool(scope["parts_deferred"]))
+            check("PDF this-build quantities, checklist page and deferred chapters match manual.json", "passed" if this_in_pdf == [q for _, q in ref_this] and headings else "failed",
+                  {"pdf": this_in_pdf, "ref": [q for _, q in ref_this], "headings": headings})
         groups_in_pdf = [int(m) for m in re.findall(r"^\s*Subassembly (\d+):", text, re.M)]
         check("PDF subassembly headings are 1..M in order", "passed" if groups_in_pdf == [i for _, i in ref_groups] else "failed", {"pdf": groups_in_pdf, "ref": [i for _, i in ref_groups]})
+        if ref_ginst:
+            # every subassembly heading states how many of it the project needs
+            inst_in_pdf = [int(m) for m in re.findall(r"^\s*Subassembly \d+: .*?\((\d+) in this project\)\s*$", text, re.M)]
+            check("PDF subassembly instance counts match manual.json", "passed" if inst_in_pdf == [n for _, n, _ in ref_ginst] else "failed", {"pdf": inst_in_pdf, "ref": [n for _, n, _ in ref_ginst]})
         joints_in_pdf = [int(m) for m in re.findall(r"^\s*Joint (\d+):", text, re.M)]
         check("PDF joint headings are 1..K in order", "passed" if joints_in_pdf == [i for _, i in ref_joints] else "failed", {"pdf": joints_in_pdf, "ref": [i for _, i in ref_joints]})
         if sup["present"]:
@@ -185,6 +230,16 @@ def run(args):
             info = run_cmd([pdfinfo, str(pdf)]).stdout
             pages = int(re.search(r"Pages:\s+(\d+)", info).group(1))
             report["pdf_pages"] = pages
+            if exploded:
+                # the exploded view's key prints each subassembly's page number (a Typst label lookup): it must be the page with that heading
+                heading_page = {}
+                for i in range(1, pages + 1):
+                    for m in re.finditer(r"^\s*Subassembly (\d+):", run_cmd([pdftotext, "-f", str(i), "-l", str(i), "-raw", str(pdf), "-"]).stdout, re.M):
+                        heading_page.setdefault(int(m.group(1)), i)
+                sect = text.split("Subassemblies, drawn apart", 1)[1].split("\nParts\n", 1)[0] if "Subassemblies, drawn apart" in text else ""
+                refs = [int(m) for m in re.findall(r"\bpage (\d+)\b", sect)]
+                want = [heading_page.get(c["number"]) for c in exploded["callouts"] if c["kind"] == "subassembly"]
+                check("PDF exploded-view key page numbers point at the subassembly pages", "passed" if refs == want and None not in want else "failed", {"pdf": refs, "headings": want})
             # one page per step after the front matter, so each step has a usable page break
             check("PDF has at least one page per step, subassembly and joint plus front matter", "passed" if pages >= len(ref_steps) + len(ref_groups) + len(ref_joints) + (2 if ref_steps else 1) else "failed",
                   f"{pages} pages for {len(ref_steps)} steps, {len(ref_groups)} subassemblies and {len(ref_joints)} joints")
@@ -200,6 +255,33 @@ def run(args):
             check("PDF pages rasterised for inspection", "passed" if r.returncode == 0 and pages_png else "failed", [str(p.relative_to(out)) for p in pages_png])
         else:
             check("PDF pages rasterised for inspection", "not-run", "pdftoppm not on PATH")
+    # viewer data beside the manual: the files the hotspots name exist with the receipt's hashes and the numbers are the manual's
+    if model.get("viewer"):
+        v = model["viewer"]
+        problems = []
+        hs_path = out / v["hotspots"]
+        if not hs_path.is_file():
+            problems.append(f"{v['hotspots']} missing")
+        else:
+            hs = receipts.read_json(hs_path)
+            for state, rel in v["files"].items():
+                f = out / rel
+                if not f.is_file() or receipts.sha256_file(f) != v["sha256"][state]:
+                    problems.append(f"{rel} missing or not the receipt's file")
+                if hs.get("states", {}).get(state, {}).get("glb") != rel:
+                    problems.append(f"hotspots.json names {hs.get('states', {}).get(state, {}).get('glb')!r} for {state}, manual.json {rel!r}")
+            got = [(s["number"], s["definition"], s["shown_instance"]) for s in hs.get("subassemblies", [])]
+            want = [(g["index"], g["definition"], g["id"]) for g in model.get("groups", [])]
+            if got != want:
+                problems.append({"hotspots": got, "manual": want})
+            if hs.get("root_parts") and hs["root_parts"]["number"] != len(model.get("groups", [])) + 1:
+                problems.append("root_parts number is not groups + 1")
+            for s in hs.get("subassemblies", []) + ([hs["root_parts"]] if hs.get("root_parts") else []):
+                for state in hs.get("states", {}):
+                    a = (s.get("anchors") or {}).get(state)
+                    if not a or len(a.get("position_m", [])) != 3 or len(a.get("normal", [])) != 3:
+                        problems.append(f"{s.get('definition')}: no {state} anchor")
+        check("viewer files resolve and hotspots.json agrees with manual.json", "passed" if not problems else "failed", problems or f"{len(v['files'])} GLB(s), {len(model.get('groups', []))} subassemblies")
     convert = shutil.which("magick") or shutil.which("convert")
     if not model["steps"]:
         check("greyscale step images written for monochrome inspection", "not-run", "no steps: inventory-only document")

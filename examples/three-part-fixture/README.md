@@ -23,7 +23,8 @@ tolerances and a physical build are not qualified.
 | `instructions.json` | Hand-authored three-step example and camera |
 | `inventory.json` | Hand-authored required quantities; no stock record (the deprecated `counted: null` is kept for the generator receipt's hash) |
 | `supplement.json` | Hand-authored synthetic supplementary items (not modelled in CAD): a candidate family with unknown quantities and a kit `included_with`, a specified SKU with integers, a counted stock record and a scene-part `included_with`, and an unplaced new-design row; all attached to the `pin_to_base` joint and the `pin-pair` group. Nothing in it is real hardware |
-| `render.json` | Illustration settings only (looks, the `pin-pair` inspection view, one `pin_to_base` joint close-up); see docs/input-contract.md |
+| `render.json` | Illustration settings only (looks, the `pin-pair` inspection view, one `pin_to_base` joint close-up, an `exploded_view` spread override so the base drops clear of the pins, whose centre coincides with the root's); see docs/input-contract.md |
+| `build-scope.json` | Hand-authored synthetic build scope: pin B deferred, so the pin card prints `this build 1` beside `CAD qty 2`, a verification checklist page follows the cards and the third step prints in the deferred chapter; not a project decision |
 | `geometry-validation.json` | Generated FreeCAD export/reimport and placement checks |
 
 From the repository root:
@@ -37,7 +38,10 @@ hand-authored fixture quantities/step IDs against the known scene, but does not
 implement the generic validation library. Later renderer output should go under
 an ignored directory such as `build/three-part-fixture/`.
 
-The manual shows a pictured inventory, the supplementary items table (the two
+The manual opens with the finished assembly and the subassemblies drawn apart
+(the pin pair lifted, the base dropped; numbered callouts that are the
+subassembly page numbers), and `viewer.py` writes the two viewer GLBs with
+anchors beside the renders. It then shows a pictured inventory, the supplementary items table (the two
 existing-design rows; the new-design row only with `--appendix`), the
 `pin-pair` inspection view and the `pin_to_base` joint close-up (pin A and the
 base framed, pin B faded) each with its "hardware to review" list, placement

@@ -143,6 +143,39 @@ prints every field of every row. `manual.json` carries every row and the
 group/joint mapping; `check` compares HTML, PDF and `manual.json` for the
 printed rows and lists.
 
+## Build scope (`build-scope.json`, optional)
+
+Schema 1 (integer), beside the manifests; contract from the Linux CAD agent
+(2026-10-22), implemented 2026-10-23. One build phase: `scene` (the scene
+file; the recipe's own path is accepted when the file name is the loaded
+scene's), `phase` (an identifier), `title`, `decided_by`, `review_state`
+(the usual states; `draft` prints as the draft banner), `deferred_occurrence_ids`
+(each must exist; may be empty), `conditional_groups` (a list of `{id, rule,
+decided}`: a non-root assembly id, a sentence, and true, false or null),
+`backlight` (a sentence), `deferred_design` (a list of strings), `note`. Every
+field is explicit; unknown fields are refused. The scope never changes the
+scene or its CAD counts. Effects: every installed occurrence is in this
+build, conditional (under a conditional group with `decided: null`) or
+deferred (listed, or under a group decided against); parts cards print the
+this-build quantity as the large number with the CAD count, the conditional
+and the deferred quantities beside it, and a part with nothing in this build
+moves to a "Deferred (not in this build)" section after the build parts (the
+labels follow the printed order); a one-page verification checklist lists
+every part with its picture, this-build and conditional quantities and blank
+count/by/date/location/missing boxes; a step whose additions are all deferred
+prints in a final "Deferred steps" chapter and is not accumulated by later
+steps (its own image shows it seated on the build so far), a step adding only
+conditional occurrences prints as CONDITIONAL with its rule, a build step
+with some deferred additions names them; the status block states the phase,
+the counts, the note, the backlight sentence and the deferred design items.
+`manual.json` carries `build_scope` (all of it, the per-part quantities as the
+`checklist`, the deferred and conditional step ids) and per card
+`this_build`/`conditional`/`deferred`/`scope_kind`, per step `kind`/`rule`.
+The scope is not a render input for hash gating (the inventory class); the
+renderer derives the deferred steps from it and `reuse.py` re-renders any
+step whose additions or installed-before set changed. The manual stage
+refuses a receipt whose step images were rendered under a different scope.
+
 ## Receipts and checks
 
 `geometry-validation.json` is a fixture-generator receipt. It records exported
@@ -276,6 +309,12 @@ inspection view is never an assembly step: nothing is exploded, hidden or
 reordered inside the group, and the receipt records the group's occurrence
 ids, parent and path.
 
+`step_context_alpha` (added 2026-10-23, default 0.3) draws the parts installed
+before a step as the flat context colour over transparency, so an addition
+inside what is already built (a support frame behind hung panels) stays
+visible; 1.0 draws them opaque. The step records carry `context_alpha`. A
+changed value is an appearance change: name the step views with `--views`.
+
 `joint_views` (added 2026-10-22 for per-joint close-ups) is a list of objects:
 `joint_id` (the project's joint key, required), `occurrence_ids` (the specific
 occurrences forming the joint, required, each must exist, none repeated),
@@ -296,22 +335,42 @@ occurrence ids, the context ids, the context occurrences and the hidden ones. `j
 framing margin. These are inspection views, not steps: nothing moves and no
 fastener is drawn.
 
+`exploded_view` (added 2026-10-23 for the front page) is an object: `enabled`
+(true, false or `"auto"`, the default, which draws the view when the root has
+two or more groups), `direction` (three numbers or null for
+`overview_direction`), `spread` (default 0.8), `fill` and `groups` (a list of
+`{"id", "offset_mm"}` overrides). The view moves every child assembly of the
+root, with all its occurrences, and the parts directly under the root (the
+`root-parts` group) as rigid bodies away from the root bounds centre: by
+default along the line from that centre to the group's own centre, by
+`spread` times the root box's width along that line (a group centred on the
+root stays as the reference); a project override replaces one group's
+offset. The offsets are illustration transforms only, kept apart from the
+installed poses, recorded in the receipt (`exploded_view.offsets_mm`, each
+group's `source` radial or project) and in `hotspots/exploded.json`; they
+imply no order. The installed poses are restored and verified after the view
+like after every other. An unknown group id is refused.
+
 ### Stage outputs
 
 | File | Written by | Content |
 | --- | --- | --- |
-| `inspect.json` | `python3 -m mechanical_docs inspect` | validated parts, occurrences with world transforms, steps with cumulative state, inventory reconciliation with stock records, the supplement's rows and summary (by scope, kind, status; unknown quantities; unplaced rows), input hashes |
+| `inspect.json` | `python3 -m mechanical_docs inspect` | validated parts, occurrences with world transforms, steps with cumulative state (deferred steps flagged), inventory reconciliation with stock records, the supplement's rows and summary (by scope, kind, status; unknown quantities; unplaced rows), the build scope's summary and per-part phase quantities, input hashes |
 | `meshes/<part>.glb`, `meshes/meshes.json` | `cad_mesh.py` (FreeCADCmd) | one GLB per part (metres, +Y up, conversion recorded in the asset extras), declared STEP unit versus manifest unit, STEP validity/bounds/volume, mesh winding and volume checks, tessellation attempts under the per-part triangle budget, hashes |
-| `renders/*.png`, `renders/hotspots/*.json`, `renders/render-receipt.json` | `render.py` (Blender) | thumbnails (wide ones plus end views for long parts), overview, subassembly inspection views (`group-*.png` with occurrence ids, parent and path), joint close-ups (`joint-*.png` with joint id, occurrence ids, context assembly and context occurrences), step and result images; projected occurrence boxes; versions, engine, denoiser, settings hash, per-view hashes, visible triangles and whether line art was drawn, which views were copied from an earlier receipt (`--reuse`: same scene, assets, instructions, meshes and engine; the inventory and supplement may differ; a copy is refused when the view's joint specification changed or outlines became affordable; `reused_from` per view, `stale_reused_views` per receipt), mesh-bounds and pose-restoration checks |
-| `manual/manual.json`, `index.html`, `manual.typ`, `<id>.pdf`, `build-receipt.json` | `python3 -m mechanical_docs manual [--appendix]` | the single document model and both outputs generated from it: picture-led parts cards (CAD quantity labelled as such, stock record when recorded, paper count box), the supplementary items section (existing-design rows), one page per subassembly inspection view and per joint close-up with their "hardware to review" lists, overview, steps, a compact build record; `--appendix` adds the technical appendix (full part ids, Vault ids, occurrence lists, every hash, every supplement row and field, stock records), which manual.json always carries |
-| `manual/check-report.json`, `manual/checks/` | `python3 -m mechanical_docs check` | HTML/PDF/manual.json agreement (parts, CAD quantities, subassembly sections and their part counts, joint sections, supplementary rows and the per-group/per-joint hardware lists, step order; supplementary rows separate from CAD parts with unknown quantities kept unknown), link and image resolution, page rasters and greyscale copies |
+| `renders/*.png`, `renders/hotspots/*.json`, `renders/render-receipt.json` | `render.py` (Blender) | thumbnails (wide ones plus end views for long parts), overview, the exploded subassembly view (`exploded.png` with the offsets used per group and the group membership in its hotspots), subassembly inspection views (`group-*.png` with occurrence ids, parent and path), joint close-ups (`joint-*.png` with joint id, occurrence ids, context assembly and context occurrences), step and result images; projected occurrence boxes; versions, engine, denoiser, settings hash, per-view hashes, visible triangles and whether line art was drawn, which views were copied from an earlier receipt (`--reuse`: same scene, assets, meshes and engine; the inventory, supplement and build scope may differ, and so may the instructions, which then stale the overview and every step view; a copy is also refused when a joint or exploded specification changed, a step's additions or installed-before set changed, or outlines became affordable; `reused_from` per view, `stale_reused_views` per receipt), the build scope's file hash and deferred steps, mesh-bounds and pose-restoration checks |
+| `renders/viewer/assembled.glb`, `exploded.glb`, `viewer-receipt.json` | `viewer.py` (bpy) | one GLB per state: metres, +Y up, one mesh per part shared by every occurrence through nodes, node names = occurrence ids, one parent node per subassembly instance named by its id (nested as in the scene; the top-level groups carry the exploded offsets in `exploded.glb`), the root's own parts under `root-parts`, one flat material, no textures or Draco; meshes over their share of the triangle budget (default 200 000 per file, small parts kept whole) collapse-decimated with normals split at sharp edges; the receipt records the budget, per-part triangles before and after, instanced totals, hashes, the offsets (from the render receipt, which must match the project) and one anchor per subassembly instance and for the root parts in both states (bounds centre projected onto the nearest surface, with its outward normal) |
+| `manual/manual.json`, `index.html`, `manual.typ`, `<id>.pdf`, `build-receipt.json`, `viewer/` | `python3 -m mechanical_docs manual [--appendix]` | the single document model and both outputs generated from it: the finished assembly first, then the subassemblies drawn apart with numbered callouts (the subassembly page numbers, one per definition on the instance that shows best, the root's own parts as the next number) and a key with page references (Typst labels) or links (HTML), picture-led parts cards (CAD quantity labelled as such, stock record when recorded, a paper count box with its label beside it), the supplementary items section (existing-design rows), one page per subassembly inspection view (its definition, grouped by the exporter's `document` or else by the id stem, with the instance count, the shown and the other instance ids, per-subassembly counts and a total for all instances only when they are identical in content: same parts and quantities, none flexible or position-overridden; `groups[].definition`, `instance_ids`, `instance_count`, `instances_identical` in manual.json; a document/id-stem disagreement is a finding) and per joint close-up with their "hardware to review" lists, steps, a compact build record; when `renders/viewer/` exists, `viewer/assembled.glb`, `viewer/exploded.glb` (hash-checked copies) and `viewer/hotspots.json` (schema 1, agreed with the Linux CAD agent 2026-10-23: `states` with GLB paths, drawn triangles and offsets, `triangle_budget`, `subassemblies[]` with the manual's number, definition, instance ids, shown instance, `instances_identical`, anchors per state and the shown instance's union box in `overview.png` and `exploded.png`, `root_parts` likewise) beside `manual.json`, whose `exploded_view` (image, offsets, callouts with boxes) and `viewer` (files, hashes, budget) sections point at them; `--appendix` adds the technical appendix (full part ids, Vault ids, occurrence lists, every hash, every supplement row and field, stock records), which manual.json always carries |
+| `manual/check-report.json`, `manual/checks/` | `python3 -m mechanical_docs check` | HTML/PDF/manual.json agreement (parts, CAD quantities, subassembly sections with their part counts and instance counts, exploded-view callouts and the PDF key's page numbers against the pages that carry the subassembly headings, joint sections, supplementary rows and the per-group/per-joint hardware lists, step order; supplementary rows separate from CAD parts with unknown quantities kept unknown), link and image resolution, viewer files against their receipt and `hotspots.json` against the manual's numbers, page rasters and greyscale copies |
 
 Each stage refuses inputs whose hashes differ from the receipt it consumes for
 the inputs that stage depends on: the render stage compares meshes.json with
-the scene and asset hashes, `--reuse` and the manual stage compare render
-receipts with the scene, asset and instruction hashes (a recorded stock
-count or a new supplement row needs a new manual, never a new render), and
-every receipt still records every input hash. Receipts that report failed
+the scene and asset hashes; `--reuse` compares the earlier receipt's scene and
+asset hashes and then judges every view on its own (instructions, joint and
+exploded specifications, step states, outline budget); the manual stage
+compares the render receipt with the scene, asset and instruction hashes and
+the step records with the current build scope (a recorded stock count, a new
+supplement row or a changed scope needs a new manual, never a new render
+unless a step's state changed); and every receipt still records every input hash. Receipts that report failed
 checks or partial renders are refused.
 
 ## Exporter fields requested from the Windows adapter

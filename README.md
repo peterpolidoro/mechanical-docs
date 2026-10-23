@@ -34,8 +34,8 @@ An incoming agent should read [AGENTS.md](AGENTS.md), then:
 ## Pipeline
 
 ```text
-inspect (Python)  ->  cad_mesh.py (FreeCADCmd)  ->  render.py (Blender)  ->  manual (Python + Typst)  ->  check
-validated manifests   GLB per part + meshes.json    PNGs + render-receipt.json   manual.json, index.html, PDF   agreement, links, rasters
+inspect (Python)  ->  cad_mesh.py (FreeCADCmd)  ->  render.py (Blender)  ->  [viewer.py (bpy)]  ->  manual (Python + Typst)  ->  check
+validated manifests   GLB per part + meshes.json    PNGs + render-receipt.json   viewer GLBs + anchors   manual.json, index.html, PDF, viewer/   agreement, links, rasters
 ```
 
 ```sh
@@ -59,6 +59,7 @@ python3 -m mechanical_docs inspect examples/three-part-fixture --json build/insp
 FreeCADCmd mechanical_docs/cad_mesh.py --pass examples/three-part-fixture build/meshes [--max-triangles 50000]
 pixi run -e render render examples/three-part-fixture build/meshes/meshes.json build/renders [--preview] [--engine BLENDER_EEVEE_NEXT] [--no-lines] [--groups pin-pair] [--reuse build/renders-old]
 blender -b --python mechanical_docs/render.py -- examples/three-part-fixture build/meshes/meshes.json build/renders --engine BLENDER_EEVEE_NEXT
+.pixi/envs/render/bin/python mechanical_docs/viewer.py examples/three-part-fixture build/meshes/meshes.json build/renders [--budget 200000]   # optional: viewer GLBs beside the renders
 python3 -m mechanical_docs manual examples/three-part-fixture --renders build/renders --out build/manual --meshes build/meshes/meshes.json [--appendix]
 python3 -m mechanical_docs check build/manual
 ```
@@ -66,7 +67,12 @@ python3 -m mechanical_docs check build/manual
 `--groups` (or `inspection_groups` in `render.json`) renders named subassemblies
 alone as inspection views; `joint_views` in `render.json` renders per-joint
 close-ups (the listed occurrences framed, the rest of their context faded or
-hidden); `--reuse` copies views from an earlier complete receipt made from
+hidden); `exploded_view` in `render.json` (on by default when the root has two
+or more groups) draws the subassemblies apart for the front page, every child
+assembly of the root and the parts directly under it moved as a rigid body by
+a recorded offset (radial default, or the project's `offset_mm`); `viewer.py`
+then exports `viewer/assembled.glb` and `viewer/exploded.glb` with the same
+offsets plus anchors for a web model viewer; `--reuse` copies views from an earlier complete receipt made from
 the same scene, assets, instructions, meshes and engine (inventory and
 supplement changes never invalidate it), so changing a few thumbnails does not
 mean rendering the whole assembly again (each copied view is marked
@@ -78,7 +84,11 @@ and the part's card (a CAD ambiguity to review before the count becomes
 stock). A project's optional `supplement.json` lists hardware that is not
 modelled in CAD: validated, printed in its own section and under the joints
 it attaches to, never added to CAD quantities, unknown quantities left
-unknown (see the contract).
+unknown (see the contract). An optional `build-scope.json` scopes one build
+phase: deferred occurrences and undecided (conditional) groups, printed as
+this-build, conditional and deferred quantities on the cards, a one-page
+verification checklist, deferred and conditional step chapters and the phase
+note on the status block; CAD counts never change.
 
 Every stage writes a receipt with input hashes and tool versions and refuses
 inputs whose hashes do not match the receipt it consumes, for the inputs that
@@ -96,7 +106,10 @@ provenance, BOM structure, flexible-instance flags); see the contract.
 
 ## What the manual contains
 
-A status block with the review state; picture-led parts cards (badge, a large
+A status block with the review state; the finished assembly (web callouts to
+the parts) and the subassemblies drawn apart with numbered callouts that are
+the subassembly page numbers (links on the web, a key with page references in
+the PDF); picture-led parts cards (badge, a large
 picture, or a wide picture plus an end view for long profiles and panels, a
 short label, the overall size with inch equivalents for inch parts, the CAD
 quantity labelled as a CAD instance count rather than a purchase quantity, the
@@ -105,17 +118,23 @@ count); a separate table of supplementary items not modelled in CAD (family
 or SKU, status, required and on-hand quantities with unknown left unknown,
 what they are included with, the configuration flag), never summed with the
 CAD counts; one page per subassembly inspection view (the group's parts at
-their CAD positions with a parts list, explicitly not an assembly step) and
+their CAD positions with a parts list, explicitly not an assembly step; the
+heading names the subassembly definition and how many instances of it the
+project has, the shown instance and the others, and the parts list adds a
+"for all N" column when the instances are identical in content) and
 per joint close-up, each listing the supplementary rows attached to it as
 "hardware to review at this joint (not an approved BOM)"; the finished
 assembly with web-only clickable callouts; one page per step (parts needed
 with quantities, the step image with the previous parts subdued and the new
 part highlighted, an approach arrow and a result image when the step has a
-hint); a compact build record; and, with `--appendix`, a technical appendix
+hint); a compact build record; `viewer/hotspots.json` with the two GLBs when
+the viewer export ran (data for a site generator, not pages); and, with `--appendix`, a technical appendix
 with full part ids, Vault ids, occurrence lists, every hash, every supplement
 row with every field and the new-design rows. The checker compares HTML, PDF
 and `manual.json` for the same inventory, CAD quantities, subassembly and
-joint sections, supplementary rows and hardware lists, and step order.
+joint sections with their instance counts, exploded-view callouts and the
+key's page numbers, supplementary rows and hardware lists, step order, and
+the viewer files against their receipt.
 
 ## Ownership
 

@@ -1,6 +1,9 @@
 """A minimal binary glTF (GLB) writer and reader for triangle meshes.
 
-One mesh per file, one node, float32 positions and normals, uint32 indices.
+`write_glb`: one mesh per file, one node (the CAD stage's per-part meshes).
+`write_scene_glb`: several meshes shared by a node tree with matrices (the
+viewer export: one mesh per part, one node per occurrence, one parent node
+per subassembly instance), one flat material. Float32 positions and normals, uint32 indices.
 Positions are written in glTF's convention (metres, +Y up). The conversion
 from the scene frame (+Z up, declared units) is done here, once, by
 `to_gltf_frame`; Blender's glTF importer converts back to +Z up on import,
@@ -71,6 +74,67 @@ def write_glb(path, positions, normals, indices, name="mesh", extras=None):
     binary = pos + nrm + idx
     total = 12 + 8 + len(js) + 8 + len(binary)
     out = struct.pack("<III", MAGIC, 2, total) + struct.pack("<II", len(js), JSON_CHUNK) + js + struct.pack("<II", len(binary), BIN_CHUNK) + binary
+    Path(path).write_bytes(out)
+    return total
+
+
+FLAT_MATERIAL = {"name": "flat", "pbrMetallicRoughness": {"baseColorFactor": [0.74, 0.75, 0.77, 1.0], "metallicFactor": 0.0, "roughnessFactor": 0.65}, "doubleSided": True}
+
+
+def frame_matrix_gltf(world_m):
+    """A scene-frame (+Z up) rigid transform with its translation in metres as a
+    glTF node matrix (column-major 16 floats, +Y up): C · M · C⁻¹ with C the
+    axis change (x, y, z) -> (x, z, -y)."""
+    C = [[1, 0, 0, 0], [0, 0, 1, 0], [0, -1, 0, 0], [0, 0, 0, 1]]
+    Ci = [[1, 0, 0, 0], [0, 0, -1, 0], [0, 1, 0, 0], [0, 0, 0, 1]]
+    mul = lambda a, b: [[sum(a[r][k] * b[k][c] for k in range(4)) for c in range(4)] for r in range(4)]  # noqa: E731
+    M = mul(mul(C, world_m), Ci)
+    return [M[r][c] for c in range(4) for r in range(4)]
+
+
+def write_scene_glb(path, meshes, nodes, roots, extras=None, material=None):
+    """meshes: [{"name", "positions", "normals", "indices"}] in glTF frame (metres);
+    nodes: [{"name", "mesh": index or None, "matrix": 16 floats or None, "children": [node indices]}];
+    roots: node indices of the scene. One material for every primitive. Returns the byte size."""
+    binary = bytearray(); views = []; accessors = []; out_meshes = []
+
+    def add_view(data, target):
+        data = _pad(data)
+        views.append({"buffer": 0, "byteOffset": len(binary), "byteLength": len(data), "target": target})
+        binary.extend(data)
+        return len(views) - 1
+
+    for m in meshes:
+        pos, nrm, idx = m["positions"], m["normals"], m["indices"]
+        if len(pos) != len(nrm) or len(idx) % 3 or any(i < 0 or i >= len(pos) for i in idx):
+            raise ValueError(f"mesh {m['name']!r}: positions/normals/indices inconsistent")
+        vp = add_view(struct.pack("<%df" % (3 * len(pos)), *[c for p in pos for c in p]), 34962)
+        vn = add_view(struct.pack("<%df" % (3 * len(nrm)), *[c for p in nrm for c in p]), 34962)
+        vi = add_view(struct.pack("<%dI" % len(idx), *idx), 34963)
+        mins = [min(p[i] for p in pos) for i in range(3)]; maxs = [max(p[i] for p in pos) for i in range(3)]
+        a0 = len(accessors)
+        accessors += [{"bufferView": vp, "componentType": 5126, "count": len(pos), "type": "VEC3", "min": mins, "max": maxs},
+                      {"bufferView": vn, "componentType": 5126, "count": len(nrm), "type": "VEC3"},
+                      {"bufferView": vi, "componentType": 5125, "count": len(idx), "type": "SCALAR"}]
+        out_meshes.append({"name": m["name"], "primitives": [{"attributes": {"POSITION": a0, "NORMAL": a0 + 1}, "indices": a0 + 2, "mode": 4, "material": 0}]})
+    out_nodes = []
+    for n in nodes:
+        node = {"name": n["name"]}
+        if n.get("mesh") is not None:
+            node["mesh"] = n["mesh"]
+        if n.get("matrix") is not None:
+            node["matrix"] = [float(v) for v in n["matrix"]]
+        if n.get("children"):
+            node["children"] = list(n["children"])
+        out_nodes.append(node)
+    doc = {"asset": {"version": "2.0", "generator": "mechanical-docs gltf.py"}, "scene": 0, "scenes": [{"nodes": list(roots)}],
+           "nodes": out_nodes, "meshes": out_meshes, "materials": [material or FLAT_MATERIAL],
+           "accessors": accessors, "bufferViews": views, "buffers": [{"byteLength": len(binary)}]}
+    if extras:
+        doc["asset"]["extras"] = extras
+    js = _pad(json.dumps(doc, separators=(",", ":")).encode("utf-8"), b" ")
+    total = 12 + 8 + len(js) + 8 + len(binary)
+    out = struct.pack("<III", MAGIC, 2, total) + struct.pack("<II", len(js), JSON_CHUNK) + js + struct.pack("<II", len(binary), BIN_CHUNK) + bytes(binary)
     Path(path).write_bytes(out)
     return total
 

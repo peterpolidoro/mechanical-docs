@@ -59,6 +59,82 @@ def rendered(fixture_dir, tmp_path):
     return project, renders, receipt
 
 
+def exploded_record(renders):
+    """An exploded-view record and its hotspots added to a receipt directory."""
+    p = renders / "exploded.png"; png(p)
+    rec = {"id": "exploded", "file": p.name, "sha256": receipts.sha256_file(p), "bytes": p.stat().st_size, "width": 8, "height": 6, "seconds": 0.2, "kind": "exploded",
+           "visible": ["base-1", "pin-a", "pin-b"], "offsets_mm": {"pin-pair": [0, 0, 19.0], "root-parts": [0, 0, -19.0]}, "spread": 0.5, "direction": [0.57, -0.68, 0.46],
+           "direction_from_settings": False, "groups": [{"id": "pin-pair", "offset_mm": [0, 0, 19.0], "source": "radial", "occurrence_ids": ["pin-a", "pin-b"]},
+                                                        {"id": "root-parts", "offset_mm": [0, 0, -19.0], "source": "radial", "occurrence_ids": ["base-1"]}],
+           "poses": "exploded", "exploded": True, "note": "exploded illustration; not an assembly step"}
+    hs = {"view": "exploded", "width": 8, "height": 6, "groups": {"pin-pair": ["pin-a", "pin-b"], "root-parts": ["base-1"]}, "occurrences": [
+        {"id": "base-1", "part_id": "base", "box_px": [0, 3, 8, 6], "corners_in_frame": 8},
+        {"id": "pin-a", "part_id": "pin", "box_px": [1, 0, 3, 2], "corners_in_frame": 8}, {"id": "pin-b", "part_id": "pin", "box_px": [5, 0, 7, 2], "corners_in_frame": 8}]}
+    (renders / "hotspots" / "exploded.json").write_text(json.dumps(hs))
+    return rec, hs
+
+
+def viewer_receipt(renders, receipt):
+    """A viewer receipt with two GLB stand-ins and anchors for the fixture's groups."""
+    vdir = renders / "viewer"; vdir.mkdir(exist_ok=True)
+    files = {}
+    for state in ("assembled", "exploded"):
+        f = vdir / f"{state}.glb"; f.write_bytes(b"glTF" + state.encode())
+        files[state] = {**receipts.file_entry(f, renders), "nodes": 5, "triangles_instanced": 1164}
+    anchor = {"assembled": {"position_m": [0.0, 0.03, 0.0], "normal": [0.0, 1.0, 0.0]}, "exploded": {"position_m": [0.0, 0.049, 0.0], "normal": [0.0, 1.0, 0.0]}}
+    vr = {"kind": "mechanical-docs-viewer-receipt", "frame": "glTF: metres, +Y up; scene (+Z up, mm) via gltf.to_gltf_frame", "triangle_budget": 200000,
+          "triangles": {"original_total": 880, "decimated_total": 880, "instanced_total": 1164, "parts": {}}, "offsets_mm": {"pin-pair": [0, 0, 19.0], "root-parts": [0, 0, -19.0]},
+          "files": files, "anchors": {"pin-pair": anchor, "root-parts": anchor}, "render_receipt": receipts.file_entry(renders / "render-receipt.json")}
+    receipts.write_json(vdir / "viewer-receipt.json", vr)
+    return vr
+
+
+def test_exploded_view_callouts_and_viewer_hotspots(rendered, tmp_path):
+    project, renders, receipt = rendered
+    rec, hs = exploded_record(renders)
+    receipt = dict(receipt, views=receipt["views"] + [rec])
+    receipts.write_json(renders / "render-receipt.json", receipt)
+    vr = viewer_receipt(renders, receipt)
+    model = document.build_model(project, receipt, hotspots={"exploded": hs, "overview": json.loads((renders / "hotspots" / "overview.json").read_text())}, viewer=vr)
+    ev = model["exploded_view"]
+    assert ev["image"] == "exploded.png" and ev["offsets_mm"] == {"pin-pair": [0, 0, 19.0], "root-parts": [0, 0, -19.0]} and ev["without_page"] == []
+    # one callout per subassembly page (its number) on the instance that shows best, plus the root parts as the next number
+    assert [(c["number"], c["kind"], c["group_id"], c["callout_instance"], c["box_px"], c["anchor_px"]) for c in ev["callouts"]] == [
+        (1, "subassembly", "pin-pair", "pin-pair", [1, 0, 7, 2], [2.0, 1.0]), (2, "root-parts", "root-parts", "root-parts", [0, 3, 8, 6], [4.0, 4.5])]
+    assert ev["callouts"][0]["page_ref"] == "group-1" and ev["callouts"][1]["parts"] == [{"part_id": "base", "label": 1, "label_text": "Base", "qty": 1}]
+    assert "exploded" in model["hotspots"] and "exploded.png" in document.model_images(model)
+    # viewer data in the agreed form: the manual's numbers, the shown instance, anchors per state, union boxes per image
+    vh = model["viewer_hotspots"]
+    assert vh["schema_version"] == 1 and vh["scene_id"] == "three-part-fixture" and vh["manual_id"] == model["id"]
+    assert vh["states"]["assembled"]["glb"] == "viewer/assembled.glb" and vh["states"]["exploded"]["offsets_mm"] == ev["offsets_mm"] and vh["states"]["exploded"]["triangles"] == 1164
+    assert [(s["number"], s["definition"], s["shown_instance"], s["instance_ids"]) for s in vh["subassemblies"]] == [(1, "pin-pair", "pin-pair", ["pin-pair"])]
+    assert vh["subassemblies"][0]["overview_box_px"] == {"assembled": [1, 1, 3, 3], "exploded": [1, 0, 7, 2]} and vh["subassemblies"][0]["anchors"]["exploded"]["position_m"] == [0.0, 0.049, 0.0]
+    assert vh["root_parts"]["number"] == 2 and vh["root_parts"]["occurrence_ids"] == ["base-1"] and vh["root_parts"]["overview_box_px"]["assembled"] == [0, 0, 8, 6]
+    assert model["viewer"]["files"] == {"assembled": "viewer/assembled.glb", "exploded": "viewer/exploded.glb"} and model["viewer"]["triangle_budget"] == 200000
+    # the outputs: overview and exploded view in front, callouts and the key with links and page references
+    out = tmp_path / "manual"; document.stage_images(model, renders, out)
+    html = html_out.render(model, out); typ = typst_out.render(model)
+    assert html.index('id="overview"') < html.index('id="exploded"') < html.index('id="parts"') and html.count('<h2 id="overview">') == 1
+    assert 'data-callout="1" data-callout-target="pin-pair"' in html and 'href="#group-pin-pair"' in html and 'data-callout="2" data-callout-target="root-parts"' in html
+    assert typ.index("== Finished assembly") < typ.index("== Subassemblies, drawn apart") < typ.index("== Parts")
+    assert "#context link(<group-1>)[page #query(<group-1>).first().location().page()]" in typ and "<group-1>" in typ.split("== Subassembly 1")[1].split("\n")[0]
+    assert typ.count("#cbadge(1)") == 2 and "#place(top + left" in typ
+    # a receipt that moves an occurrence under the wrong group, or not at all, is refused
+    bad = dict(receipt, views=receipt["views"][:-1] + [dict(rec, groups=[dict(rec["groups"][0], occurrence_ids=["pin-a", "pin-b", "base-1"]), dict(rec["groups"][1], occurrence_ids=[])])])
+    with pytest.raises(document.DocumentError, match="belongs to"):
+        document.build_model(project, bad)
+    bad = dict(receipt, views=receipt["views"][:-1] + [dict(rec, groups=[rec["groups"][0]])])
+    with pytest.raises(document.DocumentError, match="every occurrence exactly once"):
+        document.build_model(project, bad)
+    # the build stages the viewer files beside the manual and the checks read them back
+    args = SimpleNamespace(project_dir=str(project.dir), renders=str(renders), out=str(tmp_path / "manual2"), meshes=None, no_pdf=True, embed_images=False)
+    assert document.build(args) == 0
+    out2 = tmp_path / "manual2"
+    assert (out2 / "viewer" / "assembled.glb").read_bytes() == b"glTFassembled" and (out2 / "viewer" / "hotspots.json").is_file() and (out2 / "hotspots" / "exploded.json").is_file()
+    written = json.loads((out2 / "viewer" / "hotspots.json").read_text())
+    assert written["subassemblies"][0]["number"] == 1 and written["root_parts"]["number"] == 2
+
+
 def test_model_has_same_quantities_and_order(rendered):
     project, renders, receipt = rendered
     model = document.build_model(project, receipt)
@@ -76,7 +152,11 @@ def test_model_has_same_quantities_and_order(rendered):
     assert model["inventory"][1]["thumbnail_style"] == "long" and model["inventory"][1]["end_view"] == "part-pin-end.png"
     assert model["inventory"][0]["end_view"] is None
     assert [(g["id"], g["index"], g["short_name"], g["parent_id"]) for g in model["groups"]] == [("pin-pair", 1, "pin-pair", "root")]
-    assert model["groups"][0]["parts"] == [{"part_id": "pin", "label": 2, "name": "Pin", "label_text": "Pin", "qty": 2, "thumbnail": "part-pin.png"}]
+    assert model["groups"][0]["parts"] == [{"part_id": "pin", "label": 2, "name": "Pin", "label_text": "Pin", "qty": 2, "total_qty": 2, "per_instance": [2], "thumbnail": "part-pin.png"}]
+    # one instance of the definition (no exporter document: grouped by id stem), so the total equals the per-subassembly count
+    g = model["groups"][0]
+    assert (g["definition"], g["definition_basis"], g["definition_document"], g["instance_ids"], g["instance_count"], g["instances_identical"]) == ("pin-pair", "id", None, ["pin-pair"], 1, True)
+    assert g["heading"] == "pin-pair (1 in this project)" and g["other_instance_ids"] == [] and model["findings"]["definition_grouping"] == []
     assert [o["id"] for o in model["groups"][0]["occurrences"]] == ["pin-a", "pin-b"]
     assert any("not assembly steps" in s for s in model["status_lines"])
     assert model["appendix"] is False and "CAD qty" in model["cad_qty_note"]
@@ -201,6 +281,29 @@ def test_checks_pass_on_consistent_output_without_pdf_tools(rendered, tmp_path, 
     assert statuses["HTML links resolve"] == "passed"
     assert statuses["PDF present"] == "failed"      # --no-pdf: honestly reported
     assert rc == 1
+
+
+def test_checks_cover_exploded_callouts_and_viewer_files(rendered, tmp_path, monkeypatch):
+    project, renders, receipt = rendered
+    rec, hs = exploded_record(renders)
+    receipt = dict(receipt, views=receipt["views"] + [rec]); receipts.write_json(renders / "render-receipt.json", receipt)
+    viewer_receipt(renders, receipt)
+    out = tmp_path / "manual"
+    args = SimpleNamespace(project_dir=str(project.dir), renders=str(renders), out=str(out), meshes=None, no_pdf=True, embed_images=False)
+    assert document.build(args) == 0
+    monkeypatch.setattr(checks.shutil, "which", lambda name: None)
+    checks.run(SimpleNamespace(out_dir=str(out), json=None))
+    statuses = {c["name"]: c["status"] for c in json.loads((out / "check-report.json").read_text())["checks"]}
+    assert statuses["HTML exploded-view callouts match manual.json"] == "passed"
+    assert statuses["viewer files resolve and hotspots.json agrees with manual.json"] == "passed"
+    # a swapped GLB or a renumbered hotspot is caught
+    (out / "viewer" / "exploded.glb").write_bytes(b"other")
+    hsj = json.loads((out / "viewer" / "hotspots.json").read_text()); hsj["subassemblies"][0]["number"] = 3
+    (out / "viewer" / "hotspots.json").write_text(json.dumps(hsj))
+    checks.run(SimpleNamespace(out_dir=str(out), json=None))
+    rep = json.loads((out / "check-report.json").read_text())
+    bad = next(c for c in rep["checks"] if c["name"].startswith("viewer files"))
+    assert bad["status"] == "failed" and any("exploded.glb" in str(d) for d in bad["detail"]) and any("hotspots" in str(d) for d in bad["detail"])
 
 
 def test_checks_detect_tampered_html(rendered, tmp_path, monkeypatch):
@@ -340,3 +443,90 @@ def test_stock_record_and_configuration_flag_reach_the_card(project_copy, tmp_pa
     for text in (html, typ):
         assert "on hand 0 (counted 2026-10-22 by fixture author)" in text and "intended configuration confirmed: no" in text and "review before counting as stock" in text
     assert 'value="0"' not in html          # the paper box stays blank; stock is text, not the box
+
+
+def group_receipt(project, renders, gid, visible):
+    """A synthetic complete receipt with thumbnails, an overview and one group view."""
+    (renders / "hotspots").mkdir(parents=True, exist_ok=True)
+    views = []
+    for vid, kind in (("part-base", "part-thumbnail"), ("part-pin", "part-thumbnail"), ("overview", "overview"), (f"group-{slug_of(gid)}", "group")):
+        p = renders / f"{vid}.png"; png(p)
+        rec = {"id": vid, "file": p.name, "sha256": receipts.sha256_file(p), "bytes": p.stat().st_size, "width": 8, "height": 6, "seconds": 0.1, "kind": kind}
+        if kind == "group":
+            rec.update({"group_id": gid, "parent_id": "root", "assembly_path": ["root", gid], "visible": visible, "poses": "canonical", "exploded": False})
+        views.append(rec)
+    return {"kind": "mechanical-docs-render-receipt", "blender": "test", "engine": "TEST", "denoiser": None, "preview": False, "samples": 1,
+            "long_side_px": 8, "settings_sha256": "0" * 64, "input_hashes": project.input_hashes(), "views": views, "partial": False,
+            "inventory_only": True, "all_checks_passed": True, "warnings": []}
+
+
+def slug_of(x):
+    from mechanical_docs.names import slug
+    return slug(x)
+
+
+def test_subassembly_instances_grouped_by_document(project_copy, tmp_path):
+    """Instances of one definition are found by the exporter's document, counted on the
+    page, and totalled only when their content is identical; an id-stem disagreement is a finding."""
+    def scene(d):
+        pair = next(a for a in d["assemblies"] if a["id"] == "pin-pair")
+        pair["document"] = "C:\\vault\\PIN PAIR.iam"
+        second = dict(pair, id="PIN PAIR:2", transform=[[1, 0, 0, 0], [0, 1, 0, 30], [0, 0, 1, 0], [0, 0, 0, 1]])
+        d["assemblies"].append(second)
+        for occ in [o for o in d["occurrences"] if o["parent_id"] == "pin-pair"]:
+            d["occurrences"].append(dict(occ, id=occ["id"] + "-2", parent_id="PIN PAIR:2"))
+    project_copy.edit("scene.json", scene)
+    project_copy.edit("inventory.json", lambda d: d["items"][1].__setitem__("required", 4))
+    (project_copy.dir / "instructions.json").unlink(); (project_copy.dir / "supplement.json").unlink()
+    project = load_project(project_copy.dir)
+    renders = tmp_path / "renders"
+    model = document.build_model(project, group_receipt(project, renders, "pin-pair", ["pin-a", "pin-b"]))
+    g = model["groups"][0]
+    assert g["definition"] == "PIN PAIR" and g["definition_basis"] == "document" and g["definition_document"].endswith("PIN PAIR.iam")
+    assert g["instance_ids"] == ["pin-pair", "PIN PAIR:2"] and g["instance_count"] == 2 and g["other_instance_ids"] == ["PIN PAIR:2"]
+    assert g["instances_identical"] is True and g["parts"][0]["total_qty"] == 4 and g["parts"][0]["per_instance"] == [2, 2]
+    assert g["heading"] == "PIN PAIR (2 in this project)"
+    # the id stems differ ("pin-pair" vs "PIN PAIR") while the documents agree: recorded as a finding, document grouping printed
+    assert model["findings"]["definition_grouping"] == [{"assembly": "pin-pair", "definition": "PIN PAIR", "by_document": ["pin-pair", "PIN PAIR:2"], "by_id_stem": ["pin-pair"]}]
+    assert any("group differently by document and by id" in s for s in model["status_lines"])
+    out = tmp_path / "manual"; document.stage_images(model, renders, out)
+    html = html_out.render(model, out); typ = typst_out.render(model)
+    assert 'data-instance-count="2" data-identical="true"' in html and "For all 2" in html and 'data-total="4"' in html
+    assert "== Subassembly 1: PIN PAIR (2 in this project)" in typ and "For all 2" in typ and "×4" in typ
+    # a third instance with one pin fewer: the instances differ, no total, each instance's count listed
+    def third(d):
+        pair = next(a for a in d["assemblies"] if a["id"] == "pin-pair")
+        d["assemblies"].append(dict(pair, id="PIN PAIR:3", transform=[[1, 0, 0, 0], [0, 1, 0, 60], [0, 0, 1, 0], [0, 0, 0, 1]]))
+        d["occurrences"].append(dict(next(o for o in d["occurrences"] if o["id"] == "pin-a"), id="pin-a-3", parent_id="PIN PAIR:3"))
+    project_copy.edit("scene.json", third)
+    project_copy.edit("inventory.json", lambda d: d["items"][1].__setitem__("required", 5))
+    project = load_project(project_copy.dir)
+    model = document.build_model(project, group_receipt(project, tmp_path / "renders2", "pin-pair", ["pin-a", "pin-b"]))
+    g = model["groups"][0]
+    assert g["instance_count"] == 3 and g["instances_identical"] is False and g["instances_differ_because"] == "different parts or quantities"
+    assert g["parts"][0]["total_qty"] is None and g["parts"][0]["per_instance"] == [2, 2, 1]
+    out = tmp_path / "manual2"; document.stage_images(model, renders, out)
+    html = html_out.render(model, out); typ = typst_out.render(model)
+    assert "Each instance" in html and "2 / 2 / 1" in html and 'data-identical="false"' in html
+    assert "Each instance" in typ and "2 / 2 / 1" in typ and "instances differ" in typ
+    # a flexible instance never totals, even with equal content; the flexible fact is also a note
+    project_copy.edit("scene.json", lambda d: [o.__setitem__("parent_flexible", True) for o in d["occurrences"] if o["parent_id"] == "PIN PAIR:2"])
+    project = load_project(project_copy.dir)
+    model = document.build_model(project, group_receipt(project, tmp_path / "renders3", "pin-pair", ["pin-a", "pin-b"]))
+    assert "flexible" in model["groups"][0]["instances_differ_because"] and model["groups"][0]["content_notes"].startswith("flexible assembly")
+    # a single flexible instance is identical to itself: no "differ" wording, the fact stays a note (Linux, 2026-10-23)
+    def single(d):
+        d["assemblies"] = [a for a in d["assemblies"] if a["id"] not in ("PIN PAIR:2", "PIN PAIR:3")]
+        d["occurrences"] = [o for o in d["occurrences"] if o["parent_id"] not in ("PIN PAIR:2", "PIN PAIR:3")]
+        for o in d["occurrences"]:
+            if o["parent_id"] == "pin-pair":
+                o["parent_flexible"] = True
+    project_copy.edit("scene.json", single)
+    project_copy.edit("inventory.json", lambda d: d["items"][1].__setitem__("required", 2))
+    project = load_project(project_copy.dir)
+    model = document.build_model(project, group_receipt(project, tmp_path / "renders4", "pin-pair", ["pin-a", "pin-b"]))
+    g = model["groups"][0]
+    assert g["instance_count"] == 1 and g["instances_identical"] is True and g["instances_differ_because"] == "" and g["content_notes"].startswith("flexible assembly")
+    out = tmp_path / "manual3"; document.stage_images(model, renders, out)
+    html = html_out.render(model, out); typ = typst_out.render(model)
+    assert "instances differ" not in typ and "Each instance" not in typ and "flexible assembly" in typ and "flexible assembly" in html

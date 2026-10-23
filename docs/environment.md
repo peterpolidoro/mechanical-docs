@@ -8,7 +8,7 @@ observed on 2026-10-21 and are also recorded in every stage's receipt.
 | --- | --- | --- | --- |
 | Base | `manifest.scm` | Python 3.12.12, PyYAML 6.0.3, pytest 9.0.2, Git | `inspect`, the test suite |
 | CAD | `.guix/manifest-cad.scm` | FreeCAD 1.1.3 (`FreeCADCmd`) | fixture generator, `cad_mesh.py` |
-| Render | `.guix/manifest-render.scm` or Pixi `render` | Blender 4.5.10 (Guix, no denoiser) or bpy 4.5.14 wheel (Pixi, OpenImageDenoise); see below | `render.py` |
+| Render | `.guix/manifest-render.scm` or Pixi `render` | Blender 4.5.10 (Guix, no denoiser) or bpy 4.5.14 wheel (Pixi, OpenImageDenoise); see below | `render.py`, `viewer.py` (decimation, closest-point anchors; any bpy) |
 | Publish | `.guix/manifest-publish.scm` | Typst 0.15, Poppler 22.09 (`pdftotext`, `pdfinfo`, `pdftoppm`, `pdfimages`), ImageMagick 6.9 | `manual`, `check` |
 
 ```sh
@@ -122,6 +122,13 @@ inspection view and 58 s for the overview (Cycles, denoiser, 64 adaptive
 samples; the floor's second pass dominates on so small a scene). On the
 enclosure a close-up of a few parts will stay well under the line budget, so
 it renders with outlines even where the frame views do not.
+
+Phase-1 step renders, observed on 2026-10-23: with the instructions added to
+the enclosure, `--reuse` on the front-page receipt rendered the overview (52 s)
+and 18 step images (15 to 38 s each with outlines for the six frame steps up
+to 600 000 visible triangles, 6 to 10 s each without above it) in 308 s and
+reused the 67 other views; a changed `step_context_alpha` is an appearance
+change and needs the step views named with `--views`.
 
 ## Typst and Poppler
 

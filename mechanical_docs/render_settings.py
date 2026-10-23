@@ -42,7 +42,7 @@ DEFAULTS = {
     # The catcher costs Cycles a second full pass (about 4x the view time), so by
     # default only the part thumbnails and the overview get it; add "step" and
     # "step-result" to `views` for the step images too.
-    "floor": {"enabled": "auto", "views": ["part-thumbnail", "overview", "group", "joint"], "color": [0.46, 0.47, 0.49], "roughness": 0.9, "size_factor": 40},
+    "floor": {"enabled": "auto", "views": ["part-thumbnail", "overview", "exploded", "group", "joint"], "color": [0.46, 0.47, 0.49], "roughness": 0.9, "size_factor": 40},
     "long_side_px": 1600,
     "preview_long_side_px": 480,
     "thumbnail_px": 600,
@@ -77,6 +77,15 @@ DEFAULTS = {
     "joint_fill": 0.80,
     "joint_context_style": "faded",
     "overview_direction": [1.0, -1.2, 0.8],   # used when a project has no instructions (inventory only)
+    # Exploded view of the subassemblies (front page): every child assembly of the
+    # root and the parts directly under it move as rigid bodies away from the root
+    # bounds centre (radial default: `spread` times the centre distance, at least the
+    # group's own width along it; a large group centred on the root stays); a project may
+    # override any group's offset. Illustration transforms only, recorded in the
+    # receipt; they imply no order. "auto" draws it when there are two or more groups.
+    #   {"enabled": "auto", "direction": null, "spread": 0.8, "fill": 0.86,
+    #    "groups": [{"id": "PANEL ASSEMBLY:1", "offset_mm": [0, -600, 0]}]}
+    "exploded_view": {"enabled": "auto", "direction": None, "spread": 0.8, "fill": 0.86, "groups": []},
     "film_transparent": True,
     "view_transform": "Standard",
     "look": "None",
@@ -90,6 +99,10 @@ DEFAULTS = {
     "default_look": "grey-plastic",
     "looks": {},
     "context_color": [0.80, 0.81, 0.83],
+    # Step images: the parts installed before the step are ghosted (this fraction of
+    # the flat context colour over transparency) so an addition inside what is already
+    # built stays visible; 1.0 draws them opaque as the joint views' faded context.
+    "step_context_alpha": 0.3,
     "lines": {
         "enabled": True,
         # Freestyle's view map grows superlinearly with edge count; above this many visible
@@ -108,11 +121,12 @@ DEFAULTS = {
 # render.json may set these top-level keys; palette entries may be added, not the whole palette replaced.
 OVERRIDABLE = {"engine", "samples", "preview_samples", "cycles_samples", "cycles_preview_samples", "cycles_adaptive_threshold", "cycles_max_bounces", "cycles_persistent_data", "floor", "long_side_px", "preview_long_side_px", "thumbnail_px", "aspect", "fill",
                "thumbnail_fill", "thumbnail_direction", "thumbnail_long_aspect", "thumbnail_long_px", "thumbnail_long_aspect_px", "thumbnail_long_direction", "thumbnail_end_view",
-               "inspection_groups", "group_direction", "group_fill", "joint_views", "joint_direction", "joint_fill", "joint_context_style", "overview_direction", "film_transparent", "view_transform", "look", "exposure", "world", "studio",
-               "default_look", "looks", "context_color", "lines", "arrow", "palette", "note", "schema_version"}
+               "inspection_groups", "group_direction", "group_fill", "joint_views", "joint_direction", "joint_fill", "joint_context_style", "overview_direction", "exploded_view", "film_transparent", "view_transform", "look", "exposure", "world", "studio",
+               "default_look", "looks", "context_color", "step_context_alpha", "lines", "arrow", "palette", "note", "schema_version"}
 
 
 JOINT_VIEW_FIELDS = {"id", "joint_id", "occurrence_ids", "direction", "context", "context_style"}
+EXPLODED_FIELDS = {"enabled", "direction", "spread", "fill", "groups"}
 JOINT_CONTEXT_STYLES = ("faded", "hidden")
 
 
@@ -160,6 +174,38 @@ def check_joint_views(views, context_style):
     return out
 
 
+def check_exploded_view(ev):
+    """Structural validation of `exploded_view` (group ids are checked by the
+    renderer, which has the scene)."""
+    where = "render.json: exploded_view"
+    if not isinstance(ev, dict):
+        raise SettingsError(f"{where} must be an object")
+    extra = sorted(set(ev) - EXPLODED_FIELDS)
+    if extra:
+        raise SettingsError(f"{where}: unsupported field(s) {extra}; accepted {sorted(EXPLODED_FIELDS)}")
+    if ev["enabled"] not in (True, False, "auto"):
+        raise SettingsError(f"{where}.enabled: expected true, false or \"auto\"")
+    if ev["direction"] is not None and not _vec3(ev["direction"]):
+        raise SettingsError(f"{where}.direction: expected three numbers or null")
+    for k in ("spread", "fill"):
+        if not isinstance(ev[k], (int, float)) or isinstance(ev[k], bool) or ev[k] < 0:
+            raise SettingsError(f"{where}.{k}: expected a non-negative number")
+    if not isinstance(ev["groups"], list):
+        raise SettingsError(f"{where}.groups: expected a list of {{id, offset_mm}} objects")
+    seen = set()
+    for i, g in enumerate(ev["groups"]):
+        if not isinstance(g, dict) or set(g) != {"id", "offset_mm"}:
+            raise SettingsError(f"{where}.groups[{i}]: expected exactly the fields id and offset_mm")
+        if not isinstance(g["id"], str) or not g["id"].strip():
+            raise SettingsError(f"{where}.groups[{i}].id: expected a non-empty string")
+        if not _vec3(g["offset_mm"]):
+            raise SettingsError(f"{where}.groups[{i}].offset_mm: expected three numbers (millimetres)")
+        if g["id"] in seen:
+            raise SettingsError(f"{where}.groups: {g['id']!r} listed twice")
+        seen.add(g["id"])
+    return ev
+
+
 def load_settings(project_dir):
     """(settings dict, path of render.json or None)."""
     path = Path(project_dir) / "render.json"
@@ -177,7 +223,7 @@ def load_settings(project_dir):
     for k, v in data.items():
         if k in ("note", "schema_version"):
             continue
-        if k in ("palette", "looks", "studio", "lines", "arrow", "world", "floor") and isinstance(v, dict):
+        if k in ("palette", "looks", "studio", "lines", "arrow", "world", "floor", "exploded_view") and isinstance(v, dict):
             s[k].update(v)
         else:
             s[k] = v
@@ -188,6 +234,10 @@ def load_settings(project_dir):
     if s["joint_context_style"] not in JOINT_CONTEXT_STYLES:
         raise SettingsError(f"render.json: joint_context_style must be one of {JOINT_CONTEXT_STYLES}")
     s["joint_views"] = check_joint_views(s["joint_views"], s["joint_context_style"])
+    s["exploded_view"] = check_exploded_view(s["exploded_view"])
+    a = s["step_context_alpha"]
+    if not isinstance(a, (int, float)) or isinstance(a, bool) or not 0.0 < a <= 1.0:
+        raise SettingsError("render.json: step_context_alpha must be a number in (0, 1]")
     unknown = sorted(set(s["looks"].values()) - set(s["palette"]))
     if unknown:
         raise SettingsError(f"render.json: unknown look(s) {unknown}; palette has {sorted(s['palette'])}")
