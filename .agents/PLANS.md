@@ -16,7 +16,9 @@ mechanical CAD toolchain). No code changed; no tests or builds were run.
 - [x] Licence: 3-clause BSD, copyright Howard Hughes Medical Institute.
   `LICENSE` added here and, with the same text, in `mechanical-cad`,
   `vault-cad-tools` and `free-standing-tank-enclosure`; README, AGENTS and
-  docs/reuse.md updated. Uncommitted in all four.
+  docs/reuse.md updated. Peter committed it here as `1772669` and in
+  `mechanical-cad` as `1a9235f`; uncommitted in the other two when this was
+  written.
 - Hosting: the Codeberg repositories will move to GitHub; where exactly is not
   decided. This checkout's `origin` is still Codeberg and the GitHub remote is
   `peterpolidoro`; no remote was changed.
@@ -31,9 +33,27 @@ mechanical CAD toolchain). No code changed; no tests or builds were run.
   appearances (assigned to this pipeline by vault-cad-tools
   `docs/authoring-and-materials.md` section 5, not implemented); later, taking
   the STEP validity, unit and volume checks of `cad_mesh.py` from
-  `mechanical-cad` once it exists; the enclosure keeping its current layout
-  (flat assets, `scene.json`, lock) rather than per-part directories or YAML
-  sidecars.
+  `mechanical-cad` once it exists.
+- Superseded the same day: the suggestion to keep the enclosure's layout.
+  Peter intends to re-export the enclosure into a layout still to be agreed,
+  and the proposal is now one directory per Vault file (parts and assemblies),
+  with the flattened `scene.json` this loader reads derived from per-assembly
+  manifests. Under that proposal the loader and renderer stay as they are and
+  the curated manifests need a one-time re-key of part ids. The proposal and
+  the order of work are in `mechanical-cad/docs/direction.md` (draft, not yet
+  accepted by Peter); nothing here changes until it is.
+- [x] Handoff: Peter will run the cross-repository work from an agent session
+  rooted in `mechanical-cad`. That repository now has its guidance, plan,
+  direction and layout proposal (`docs/layout-proposal.md` holds the
+  measurements made on the enclosure today). `docs/next-agent.md`,
+  `.agents/AGENTS.md` and the README here point at it. A message for the Linux
+  role was posted in the shared mailbox (`to-linux/20261110T161601Z-documentation-direction-layout-proposal-and-handoff-to-mechanical-cad.md`,
+  with a correction of the commit bases at `161703Z`)
+  and `status/documentation.json` refreshed; no evidence run was written
+  because nothing was built. The shared directory is at
+  `~/sciserv/polidorop/Repositories/vault-cad-exchange/` when mounted.
+- Next for this repository: Peter's notes from assembling the enclosure with
+  the phase-1 manual, and his corrected `instructions.json`.
 
 ## Previous checkpoint — 2026-10-23 (Peter's manual review, front page, site viewer data, phase-1 scope)
 

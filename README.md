@@ -142,6 +142,9 @@ the viewer files against their receipt.
   inventory presentation and publishing tools; small synthetic regression fixtures.
 - Project repositories: their CAD assets, identifiers, inventory, procedures,
   camera choices, looks and validation records.
+- `mechanical-cad`: the direction of this work (`docs/direction.md`), the layout
+  of project repositories, tools for writing parts as code and checking
+  geometry, and the Guix channel for mechanical CAD packages.
 - `vault-cad-tools`: Autodesk-specific acquisition/export/publication.
 - `kicad-libs`: KiCad-specific extraction and PCB documentation.
 

@@ -11,6 +11,34 @@ docs/environment.md (roles, FreeCAD and Blender quirks, render cost, budgets
 and view reuse) and .agents/PLANS.md. Use .agents/handoff.local.md for the
 mailbox and evidence paths; the tracked documentation stays usable without them.
 
+## Direction since 2026-11-10
+
+Read `mechanical-cad/docs/direction.md` and `docs/layout-proposal.md` in the
+sibling repository before planning anything here. In short:
+
+- The direction of the mechanical CAD work now lives there, and work that spans
+  repositories runs from an agent session rooted there. An agent started here
+  is the documentation role.
+- The enclosure is to be re-exported into a new layout: one directory per Vault
+  file, with a manifest per assembly. Under the proposal this pipeline keeps
+  reading a `scene.json`; it becomes a derived file produced by a flatten step
+  in `mechanical-cad`. The loader, renderer and manual are expected to stay as
+  they are, and the project's curated manifests get a one-time re-key of part
+  ids. Nothing here changes until Peter accepts the layout.
+- Peter is assembling the enclosure from the published phase-1 manual and
+  taking notes. Those notes, and his corrected `instructions.json`, are the next
+  real input for this repository.
+- Licence: 3-clause BSD, copyright Howard Hughes Medical Institute (`LICENSE`).
+- Still open here: a single-part preview (render one STEP without a
+  hand-written scene) and reading the project's `materials.json` for
+  appearances. Both were proposed on 2026-11-10; neither is approved or started.
+- The shared directory is at `~/sciserv/polidorop/Repositories/vault-cad-exchange/`
+  on Peter's workstation when mounted; older notes give `/janelia/sciserv/...`,
+  which is empty there now.
+
+The sections below describe the state of 2026-10-23 and remain accurate for the
+code.
+
 ## What exists
 
 - `mechanical_docs/`: `manifest.py` (validation, production fields, +Y-up basis,

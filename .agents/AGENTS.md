@@ -12,6 +12,12 @@ joystick rendering/publishing code is the starting material; inspect it before
 inventing replacements. Keep project prose/configuration in its project and
 Autodesk/KiCad-specific extraction in their existing adapters.
 
+The direction of the wider mechanical CAD work, and the layout of the project
+repositories this pipeline reads, are kept in the sibling `mechanical-cad`
+repository (`docs/direction.md`, `docs/layout-proposal.md`). Work that spans
+repositories runs from an agent session rooted there (Peter, 2026-11-10); an
+agent started here is the documentation role and takes layout changes from it.
+
 The draft input contract and fixtures are proposals, not an implemented exporter
 interface. Coordinate changes with the CAD agent before depending on fields the
 Windows exporter does not produce. Do not guess absent production identifiers,
