@@ -7,7 +7,35 @@ CAD geometry and structured procedures, using open-source tools. First deliver
 one useful small example as HTML and PDF, then process the enclosure's accepted
 STEP/assembly exports when available.
 
-## Current checkpoint — 2026-10-23 (Peter's manual review, front page, site viewer data, phase-1 scope)
+## Current checkpoint — 2026-11-10 (licence, hosting, mechanical-cad)
+
+Decisions Peter made in this session, after reviewing a design discussion he
+had with another agent on 2026-10-27/28 (formats and scope of an open
+mechanical CAD toolchain). No code changed; no tests or builds were run.
+
+- [x] Licence: 3-clause BSD, copyright Howard Hughes Medical Institute.
+  `LICENSE` added here and, with the same text, in `mechanical-cad`,
+  `vault-cad-tools` and `free-standing-tank-enclosure`; README, AGENTS and
+  docs/reuse.md updated. Uncommitted in all four.
+- Hosting: the Codeberg repositories will move to GitHub; where exactly is not
+  decided. This checkout's `origin` is still Codeberg and the GitHub remote is
+  `peterpolidoro`; no remote was changed.
+- `mechanical-cad` (new sibling on GitHub, empty apart from its licence) will
+  hold the code-authoring and geometry-checking tools and double as the Guix
+  channel for the mechanical CAD packages (OCP, build123d, CadQuery).
+  Rendering, document meshes and the manual stay here; no second renderer is
+  planned there.
+- Proposed to Peter, not approved, nothing started: a single-part preview
+  (render one STEP without a hand-written scene) so authored parts can be
+  looked at with this renderer; reading the project's `materials.json` for
+  appearances (assigned to this pipeline by vault-cad-tools
+  `docs/authoring-and-materials.md` section 5, not implemented); later, taking
+  the STEP validity, unit and volume checks of `cad_mesh.py` from
+  `mechanical-cad` once it exists; the enclosure keeping its current layout
+  (flat assets, `scene.json`, lock) rather than per-part directories or YAML
+  sidecars.
+
+## Previous checkpoint — 2026-10-23 (Peter's manual review, front page, site viewer data, phase-1 scope)
 
 Linux message `to-documentation/20261023T140613Z-…` (Peter reviewed the
 supplement-03 manual: "looks pretty good" plus the items below) and the

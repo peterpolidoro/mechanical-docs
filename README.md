@@ -147,4 +147,8 @@ the viewer files against their receipt.
 
 Generated production meshes, renders, PDFs and sites belong in ignored build
 directories or explicitly published releases. Commits, pushes and publication
-are Peter's. No licence has been chosen for this repository yet.
+are Peter's.
+
+## Licence
+
+3-clause BSD, copyright Howard Hughes Medical Institute; see [LICENSE](LICENSE).

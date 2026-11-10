@@ -137,5 +137,7 @@ is one static page; the atlas `mkdocs.yml` and PCB hooks remain the templates.
 
 Attribution: the adapted code is by Peter Polidoro in `mouse-joysticks-mech`,
 whose `LICENSE` covers the mechanical design files (CC-BY-SA-4.0) and does not
-state a licence for the scripts. This repository has no licence file yet; the
-choice for both is Peter's and was not made here.
+state a licence for the scripts. This repository is under the 3-clause BSD
+licence, copyright Howard Hughes Medical Institute (`LICENSE`, Peter's choice of
+2026-11-10); the scripts' licence in `mouse-joysticks-mech` itself is still
+unstated and remains Peter's to set there.
