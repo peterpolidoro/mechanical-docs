@@ -1,9 +1,9 @@
 # Incoming documentation agent
 
-The first slice exists, runs on three synthetic fixtures and on the first
-production snapshot (inventory and six subassembly inspection views, no
-sequence); the supplementary-items manifest and per-joint close-ups are
-implemented and proven on the three-part fixture, not yet on the enclosure.
+The pipeline exists and runs on three synthetic fixtures and on the first
+production snapshot: the enclosure builds as a draft phase-1 manual (front page
+with the exploded view, parts cards, six subassembly inspection views, 16 joint
+close-ups, 18 draft steps, viewer data).
 Read AGENTS.md, README.md, docs/input-contract.md (implemented subset,
 production fields, flexible instances, the inventory stock record, the
 supplement contract, `joint_views`, stage outputs, exporter field request),
@@ -32,9 +32,9 @@ sibling repository before planning anything here. In short:
 - Still open here: a single-part preview (render one STEP without a
   hand-written scene) and reading the project's `materials.json` for
   appearances. Both were proposed on 2026-11-10; neither is approved or started.
-- The shared directory is at `~/sciserv/polidorop/Repositories/vault-cad-exchange/`
-  on Peter's workstation when mounted; older notes give `/janelia/sciserv/...`,
-  which is empty there now.
+- The shared directory's location on Peter's workstation is in the ignored
+  `.agents/handoff.local.md`. Paths in older notes and messages may no longer
+  exist there.
 
 The sections below describe the state of 2026-10-23 and remain accurate for the
 code.
@@ -60,9 +60,9 @@ code.
   compact build record, `viewer/hotspots.json`, the build scope's phase
   quantities, checklist and step chapters, `--appendix`), `checks.py`,
   `cli.py` (`inspect`, `inventory-template`, `manual`, `check`). `tests/` has
-  102 pure-Python tests plus `tests/test_cad_stage.py`, which runs FreeCAD on
-  the units fixture when `FreeCADCmd` is on PATH (the CAD role) and is skipped
-  otherwise.
+  124 pure-Python tests (all passing on 2026-11-10) plus two in
+  `tests/test_cad_stage.py`, which run FreeCAD on the units fixture when
+  `FreeCADCmd` is on PATH (the CAD role) and are skipped otherwise.
 - `examples/three-part-fixture/` (now with `supplement.json`: three synthetic
   supplementary rows, a `render.json` with the `pin-pair` inspection view,
   one `pin_to_base` joint close-up and an exploded-view spread, and a

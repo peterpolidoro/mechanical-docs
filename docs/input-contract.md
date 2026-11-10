@@ -1,9 +1,16 @@
-# Draft input contract
+# Input contract (draft-1)
 
-**Proposal, not an implemented or frozen interface.** The included example uses
-`schema_version: "draft-1"`. Coordinate changes with the CAD/Windows agent before
-expecting its exports to match. This document is not a substitute for the runtime
-validation the next agent must implement.
+**Implemented by `mechanical_docs/manifest.py`; the schema is `draft-1` and not
+frozen.** The Windows exporter's `scene.json` is loaded as it is written (see
+"Production fields"). Under the layout proposal in the sibling `mechanical-cad`
+repository (`docs/layout-proposal.md`) a flatten step there will write this
+`scene.json` instead. Whoever produces the file, this document and the
+validator change together, and the producing side is told before a new field
+is depended on. Where this text and the validator disagree, the validator is
+the reference and the text is the defect.
+
+The first sections describe the model with the three-part fixture as the
+example; "Implemented subset" lists exactly what the validator accepts.
 
 ## Scene (`scene.json`)
 
@@ -183,16 +190,18 @@ STEP hashes/validity/bounds/volume and the known final placements/clearance chec
 It is not a general schema validator, render result, site build or assembly-path
 qualification. No generated fixture result establishes production acceptance.
 
-The future build should hash the scene, instructions, inventory and relevant
-render/publish settings, plus asset hashes and software versions. Reject missing
-files, unknown/duplicate IDs, hierarchy cycles, bad transforms, wrong checksums,
-unsatisfied prerequisites, duplicate installation and quantity inconsistencies.
-Do not treat a matching input manifest as proof that every output file exists or
-is current; verify those separately before a manual release.
+Every stage records the hashes of the scene, instructions, inventory and the
+relevant render and publish settings, the asset hashes and the software
+versions in its receipt (see "Stage outputs"). The loader rejects missing
+files, unknown or duplicate ids, hierarchy cycles, bad transforms, wrong
+checksums, unsatisfied prerequisites, duplicate installation and quantity
+inconsistencies. A matching input manifest is not proof that every output file
+exists or is current; `check` verifies those separately before a manual is
+released.
 
-## Implemented subset (2026-10-21)
+## Implemented subset
 
-`mechanical_docs/manifest.py` implements exactly the fields above and rejects
+`mechanical_docs/manifest.py` implements exactly the fields below and rejects
 everything else with one combined error listing every problem. Accepted:
 
 | File | Fields |
@@ -201,6 +210,7 @@ everything else with one combined error listing every problem. Accepted:
 | instructions | `schema_version`, `scene`, `id`, `title`, `review_state` (draft, cad-reviewed, physically-validated), `views[]` (`id`, `projection`, `eye`, `target`, `up`), `steps[]` (`id`, `requires`, `add`, `view`, `caption`, `approach{occurrence_id, start_offset, end_offset, validation}`) |
 | inventory | `schema_version`, `scene`, `status`, `notes[]` (optional project sentences for the status block), `items[]` (`part_id`, `required`, `unit`; optional stock record `on_hand_each`, `counted_by`, `counted_date`, `stock_location`, `intended_configuration_confirmed`; deprecated `counted`, null only) |
 | supplement | `schema_version` (integer 1), `scene`, `status`, `source`, `items[]` with the 23 fields listed under *Supplement* |
+| build scope | `schema_version` (integer 1), `scene`, `phase`, `title`, `decided_by`, `review_state`, `deferred_occurrence_ids[]`, `conditional_groups[]` (`id`, `rule`, `decided`), `backlight`, `deferred_design[]`, `note`; every field explicit, see *Build scope* |
 
 ### Production fields (accepted since 2026-10-21, after the first Windows per-part export)
 
@@ -380,10 +390,8 @@ output except a refresh-stable occurrence key (ids are snapshot-scoped paths,
 declared as such in `source.occurrence_id_scope`); the raw inventory file
 (`inventory-raw.json`) serialised as a PowerShell type name and is not used.
 
-The Windows pilot's `placement-report.json` already carries occurrence names,
-document paths and hashes, grounded/suppressed/visible flags and row-major 4×4
-matrices in centimetres. To feed this contract without guessing, the per-part
-STEP plus manifest export should add:
+The request as it was made on 2026-10-21, kept because item 1's
+refresh-stable key is still open. The exporter was asked for:
 
 1. A stable occurrence identity that survives a refresh (the Inventor
    occurrence's persistent reference key or at least the full occurrence path),
@@ -399,5 +407,4 @@ STEP plus manifest export should add:
    iProperties actually have them; `null` where they do not.
 
 Grounding, constraints and surface-body counts are useful evidence but are not
-part of the documentation contract. Until these fields exist, the synthetic
-fixtures stand in; nothing in the pilot's export has been loaded as a project.
+part of the documentation contract.

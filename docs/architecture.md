@@ -1,6 +1,11 @@
 # Architecture and extraction boundaries
 
-The intended pipeline is:
+Written before the first implementation and kept as the statement of
+boundaries. The stages below exist; the README lists the commands, and
+docs/input-contract.md says what each stage reads and writes. Where a section
+says "start with", docs/reuse.md records what was actually taken.
+
+The pipeline is:
 
 ```text
 STEP parts + explicit assembly/part metadata

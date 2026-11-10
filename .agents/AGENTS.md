@@ -1,16 +1,19 @@
 # mechanical-docs agent guidance
 
-Read README.md, docs/next-agent.md, docs/input-contract.md, docs/reuse.md and
-.agents/PLANS.md. Read .agents/handoff.local.md when present. The local handoff
-contains shared-agent paths and is intentionally ignored by Git.
+Read README.md, docs/next-agent.md, docs/input-contract.md, docs/environment.md
+and .agents/PLANS.md. Read .agents/handoff.local.md when present. The local
+handoff contains shared-agent paths and is intentionally ignored by Git.
+.agents/HISTORY.md holds the finished checkpoints; read it only to trace how
+something came about.
 
 ## Scope
 
-Build reusable open-source documentation tools. Start with a small visual BOM
-and assembly sequence, keeping outputs consistent between HTML and PDF. Existing
-joystick rendering/publishing code is the starting material; inspect it before
-inventing replacements. Keep project prose/configuration in its project and
-Autodesk/KiCad-specific extraction in their existing adapters.
+Build reusable open-source documentation tools: visual inventories and
+assembly manuals, with HTML and PDF generated from one document model and kept
+consistent. The renderer was adapted from the joystick atlas (docs/reuse.md);
+inspect what exists before inventing replacements. Keep project
+prose/configuration in its project and Autodesk/KiCad-specific extraction in
+their existing adapters.
 
 The direction of the wider mechanical CAD work, and the layout of the project
 repositories this pipeline reads, are kept in the sibling `mechanical-cad`
@@ -18,16 +21,20 @@ repository (`docs/direction.md`, `docs/layout-proposal.md`). Work that spans
 repositories runs from an agent session rooted there (Peter, 2026-11-10); an
 agent started here is the documentation role and takes layout changes from it.
 
-The draft input contract and fixtures are proposals, not an implemented exporter
-interface. Coordinate changes with the CAD agent before depending on fields the
-Windows exporter does not produce. Do not guess absent production identifiers,
-units, quantities, material specifications, fastener details or assembly order.
+docs/input-contract.md is implemented by `mechanical_docs/manifest.py` and is
+the interface to whatever produces `scene.json`: the Windows exporter today, a
+flatten step in `mechanical-cad` under the layout proposal. Change the document
+and the validator together, and tell the producing side before depending on a
+field it does not write. Do not guess absent production identifiers, units,
+quantities, material specifications, fastener details or assembly order.
 
 ## Working practices
 
-- Use the managed Guix environment on Linux. When adding Pixi, provide a real
-  lock and working tasks; keep heavy CAD/render/publishing dependencies separate
-  where practical. Verify versions and output, including Blender denoising support.
+- Use the managed Guix roles on Linux (docs/environment.md). Pixi supplies the
+  `render` environment (the `bpy` wheel with its denoiser); keep `pixi.toml` and
+  `pixi.lock` in step and do not re-resolve the lock as a side effect. Keep heavy
+  CAD/render/publishing dependencies in their own roles. Verify versions and
+  output, including Blender denoising support.
 - Use a separate checkout per agent. Read existing modifications before editing;
   preserve unrelated work. Leave commits/pushes and publication to Peter unless
   specifically requested. Do not modify sibling source repositories as a side
@@ -66,6 +73,15 @@ instruction prerequisites, link/image resolution, and actual representative
 renders plus PDF/page inspection. A successful import or executable's exit code
 alone is insufficient evidence. Record not-run checks and limitations clearly.
 
-There is no general test suite or render/PDF task in this scaffold. Add meaningful
-tests with the implementation rather than a placeholder passing target. Keep the
-living plan's progress and current limitations accurate before handing off.
+Run the pure-Python suite before and after a change
+(`guix shell --pure -m manifest.scm -- python3 -B -m pytest -q tests`) and, when
+geometry, rendering or the document changes, the fixtures
+(`tools/build-fixture.sh`). Add tests with the code they cover.
+
+## The living plan
+
+.agents/PLANS.md holds the current state, the next work and the open items, and
+nothing else. When a checkpoint is finished, move its record to
+.agents/HISTORY.md. Do not write commit ids or "uncommitted" into tracked files:
+Git knows, and the text is wrong as soon as Peter commits. A checkbox is a task;
+a measurement or a decision is a sentence.

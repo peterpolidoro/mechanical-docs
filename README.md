@@ -5,18 +5,20 @@ and structured project information. The first use case is a visual parts invento
 and LEGO-style assembly manual, with matching web and printable PDF versions.
 Future uses include maintenance, replacement, disassembly and inspection guides.
 
-**Status: inventory-only manuals from the first production snapshot; technician-facing
-layout, subassembly inspection views, a supplementary-items manifest and joint
-close-ups (2026-10-22).** A validated draft-1 manifest loader (scene,
-inventory with an optional stock record, instructions, and `supplement.json`
-for items not modelled in CAD), a FreeCAD STEP-to-mesh stage, a Blender render
-stage (Cycles with OpenImageDenoise through the `bpy` wheel, EEVEE on the Guix
-Blender), and a document stage that writes one `manual.json` and generates
-HTML and a Typst PDF from it, with an output checker. Three synthetic fixtures
-build end to end, and the enclosure snapshot (37 parts, 155 occurrences)
-builds as a draft parts inventory with six subassembly inspection views. No
-assembly sequence has been authored or reviewed for production geometry, and
-nothing is physically validated.
+**Status (2026-11-10): the first production project builds as a draft manual;
+nothing is reviewed or physically validated.** A validated draft-1 manifest
+loader (scene, inventory with an optional stock record, instructions,
+`supplement.json` for items not modelled in CAD, `build-scope.json` for one
+build phase), a FreeCAD STEP-to-mesh stage, a Blender render stage (Cycles with
+OpenImageDenoise through the `bpy` wheel, EEVEE on the Guix Blender), an
+optional viewer export, and a document stage that writes one `manual.json` and
+generates HTML and a Typst PDF from it, with an output checker. Three synthetic
+fixtures build end to end. The enclosure snapshot (37 parts, 155 occurrences)
+builds as a draft manual for its first build phase: a front page with the
+subassemblies drawn apart, picture-led parts cards, six subassembly inspection
+views, 16 joint close-ups and 18 draft steps (last built 2026-10-23). The step
+order is the project's draft and has not been reviewed; it is being corrected
+from a physical build. Nothing is physically validated.
 
 ## Start here
 

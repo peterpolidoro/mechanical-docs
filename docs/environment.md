@@ -6,7 +6,7 @@ observed on 2026-10-21 and are also recorded in every stage's receipt.
 
 | Role | Definition | Verified contents | Used by |
 | --- | --- | --- | --- |
-| Base | `manifest.scm` | Python 3.12.12, PyYAML 6.0.3, pytest 9.0.2, Git | `inspect`, the test suite |
+| Base | `manifest.scm` | Python 3.12.12, pytest 9.0.2, Git | `inspect`, the test suite |
 | CAD | `.guix/manifest-cad.scm` | FreeCAD 1.1.3 (`FreeCADCmd`) | fixture generator, `cad_mesh.py` |
 | Render | `.guix/manifest-render.scm` or Pixi `render` | Blender 4.5.10 (Guix, no denoiser) or bpy 4.5.14 wheel (Pixi, OpenImageDenoise); see below | `render.py`, `viewer.py` (decimation, closest-point anchors; any bpy) |
 | Publish | `.guix/manifest-publish.scm` | Typst 0.15, Poppler 22.09 (`pdftotext`, `pdfinfo`, `pdftoppm`, `pdfimages`), ImageMagick 6.9 | `manual`, `check` |
@@ -139,7 +139,8 @@ browser is not part of any role; the HTML was checked structurally and the PDF
 visually. The checks report which tools were absent as `not-run`, never as
 passed.
 
-`pixi.toml` also has a default environment (Python, PyYAML, pytest) with
+`pixi.toml` also has a default environment (Python, pytest, and PyYAML, which
+nothing imports; it leaves with the next deliberate lock update) with
 `test`, `inspect`, `manual` and `check` tasks for machines without Guix; the
 PDF and Poppler checks still need `typst` and Poppler on PATH there. FreeCAD is
 not in Pixi; the CAD stage uses the Guix role.
