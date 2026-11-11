@@ -27,7 +27,10 @@ their measurements and evidence runs, are in .agents/HISTORY.md.
   FreeCAD-gated tests, outside the CAD role), before and after PyYAML was taken
   out of the base and publish Guix roles (nothing imports it). Not run that day:
   the fixtures, the CAD stage, any render or manual build.
-- Layout proposal (`mechanical-cad/docs/layout-proposal.md`, not accepted): the
+- Layout (`mechanical-cad/docs/layout-proposal.md`; Peter decided its three
+  choices on 2026-11-11: two roots, readable keys, AP242 for exported files.
+  An AP242 file also holds the bodies hidden in the native part; the flatten
+  step leaves them out of the scene's assets, so nothing changes here): the
   enclosure is to be re-exported as one directory per Vault file, and this
   pipeline keeps reading a `scene.json`, then written by a flatten step in
   `mechanical-cad`. No change is planned here for it. Render reuse is gated on
@@ -48,7 +51,7 @@ their measurements and evidence runs, are in .agents/HISTORY.md.
    step (`assembly/publish_manual.py` there).
 2. Whatever his notes ask of the documents themselves (cards, labels, views,
    step pages). Nothing is known yet.
-3. After the layout is accepted and the enclosure re-exported: one full render
+3. After the enclosure is converted and re-exported: one full render
    from the flattened scene, and a comparison of that manual with today's by
    parts, quantities, steps and checks.
 
