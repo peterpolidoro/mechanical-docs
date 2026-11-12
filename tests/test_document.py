@@ -148,6 +148,17 @@ def test_model_has_same_quantities_and_order(rendered):
     assert model["project_notes"] == [] and not any(s.startswith("Project note") for s in model["status_lines"])
     assert model["inventory"][0]["dimensions"] == "100 × 60 × 8 mm, hole Ø10.5 mm"
     assert model["inventory"][1]["dimensions"] == "Ø10 × 30 mm"
+
+
+@pytest.mark.parametrize("kind, said", [
+    ("autodesk-inventor-vault-snapshot", True),       # the scene as the exporter wrote it
+    ("mechanical-cad-flattened-layout", True),        # the same export, flattened from a project repository
+    ("synthetic", False)])
+def test_a_scene_from_a_cad_export_says_what_its_quantities_are(rendered, kind, said):
+    project, renders, receipt = rendered
+    project.scene.source["kind"] = kind
+    model = document.build_model(project, receipt)
+    assert any("Quantities are CAD instance counts" in s for s in model["status_lines"]) is said
     # the long part carries its end view; the group view becomes a subassembly with part counts from the scene
     assert model["inventory"][1]["thumbnail_style"] == "long" and model["inventory"][1]["end_view"] == "part-pin-end.png"
     assert model["inventory"][0]["end_view"] is None

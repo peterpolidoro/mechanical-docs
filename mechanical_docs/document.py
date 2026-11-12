@@ -622,7 +622,8 @@ def status_lines(project, render_receipt, has_groups=False, has_joints=False, de
         lines.append(f"Backlight: {bs.backlight}")
         if bs.deferred_design:
             lines.append("Deferred design: " + "; ".join(bs.deferred_design) + ".")
-    if sc.source.get("kind", "").startswith("autodesk-inventor"):
+    # a scene exported from Inventor, as the exporter wrote it or flattened from a project repository by mechanical-cad
+    if sc.source.get("kind", "").startswith(("autodesk-inventor", "mechanical-cad-flattened")):
         lines.append("Geometry and hierarchy come from the CAD export named in the build record. "
                      "Quantities are CAD instance counts, not purchase quantities, kits, stock or an approved bill of materials.")
     if sc.source.get("kind") == "synthetic":
