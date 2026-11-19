@@ -4,7 +4,9 @@
                                                      [--groups ASSEMBLY_ID,...] [--reuse RENDER_DIR]
 
 Reads the validated project (manifest.py), the CAD stage's meshes.json and the
-project's optional render.json (illustration settings: looks, sizes). Imports
+project's optional render.json (illustration settings: looks, sizes). A part is
+drawn in the look render.json names for it, else in its finish of the
+project's optional finishes.json, else in the default look (looks.py). Imports
 each part's GLB once, instantiates every occurrence at its canonical world
 pose (the scene's +Z-up frame, scaled to metres exactly once), and renders:
 
@@ -45,7 +47,8 @@ same scene, assets, instructions, meshes, engine and quality instead of
 rendering them again (the inventory and the supplement never change an image,
 so they may differ); only views named in --views, absent from that receipt, or
 stale under the current settings (a joint view whose specification changed, a
-view whose line-art state would differ under the current budget; see reuse.py)
+view whose line-art state would differ under the current budget, a view that
+shows a part whose look or finish changed; see reuse.py)
 are rendered. Other appearance changes need --views. Each copied
 view keeps its own record plus `reused_from`, so the receipt stays honest about
 what was rendered when and under which settings.
@@ -67,7 +70,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
-from mechanical_docs import explode, geometry, receipts  # noqa: E402
+from mechanical_docs import explode, geometry, looks, receipts  # noqa: E402
 from mechanical_docs import transforms as T  # noqa: E402
 from mechanical_docs.manifest import ManifestError, load_project  # noqa: E402
 from mechanical_docs.names import slug  # noqa: E402
@@ -169,6 +172,11 @@ class Renderer:
         self.scn = bpy.context.scene
         deferred = project.build_scope.deferred_ids(self.scene) if project.build_scope is not None else ()
         self.states = derive_states(project.instructions, self.scene, deferred) if project.instructions is not None else []
+        try:
+            # what every part is drawn with, and where that came from; the receipt records it
+            self.looks = looks.resolve(self.scene.parts, settings, getattr(project, "finishes", None))
+        except looks.LookError as e:
+            raise SystemExit(str(e))
         self.import_meshes()
         self.instantiate()
         self.make_materials()
@@ -267,7 +275,25 @@ class Renderer:
             if "coat" in spec:
                 bsdf.inputs["Coat Weight"].default_value = spec["coat"]
                 bsdf.inputs["Coat Roughness"].default_value = spec.get("coat_roughness", 0.1)
-            self.look_mats[name] = m
+            self.look_mats[f"look:{name}"] = m
+        # a finish of the project's finishes.json, for the parts that take their look from it
+        for look in self.looks.values():
+            key = looks.material_key(look)
+            if look["source"] != "finishes.json" or key in self.look_mats:
+                continue
+            m = bpy.data.materials.new(key); m.use_nodes = True
+            bsdf = m.node_tree.nodes["Principled BSDF"]
+            b = look["base"]
+            bsdf.inputs["Base Color"].default_value = (b[0], b[1], b[2], 1)
+            bsdf.inputs["Metallic"].default_value = look["metallic"]
+            bsdf.inputs["Roughness"].default_value = look["roughness"]
+            if look["opacity"] < 1.0:
+                bsdf.inputs["Alpha"].default_value = look["opacity"]
+                try:
+                    m.surface_render_method = "BLENDED"       # EEVEE Next
+                except Exception:
+                    pass
+            self.look_mats[key] = m
 
         def flat(name, color):
             m = bpy.data.materials.new(name); m.use_nodes = True
@@ -315,10 +341,7 @@ class Renderer:
             o.material_slots[0].material = self.part_look(pid)
 
     def part_look(self, pid):
-        name = self.s["looks"].get(pid, self.s["default_look"])
-        if name not in self.look_mats:
-            raise SystemExit(f"render.json: unknown look {name!r} for part {pid!r}; palette has {sorted(self.look_mats)}")
-        return self.look_mats[name]
+        return self.look_mats[looks.material_key(self.looks[pid])]
 
     # -------------------------------------------------------------- studio
 
@@ -823,6 +846,48 @@ class Renderer:
         self.restore(); self.verify_restored(view_id)
         return rec
 
+    def render_still(self, view_id, stands, up, group=None, size=None):
+        """A picture outside a manual: every occurrence, or one subassembly
+        alone, at its canonical pose and in its look, seen from where `stands`
+        says the camera is (a direction from the middle of what is drawn) with
+        `up` upwards in the picture. `size` is (width, height) in pixels, or
+        None for the settings' long side and aspect. Nothing is moved, and the
+        poses are restored and verified afterwards like after every other view."""
+        self.restore()
+        members = self.group_members(group) if group is not None else list(self.obj_of)
+        if not members:
+            raise SystemExit(f"--group: assembly {group!r} has no occurrences")
+        for oid, o in self.obj_of.items():
+            o.hide_render = oid not in members
+        for oid in members:
+            self.coll_subject.objects.link(self.obj_of[oid])
+        if size is None:
+            self.set_resolution(self.long_side(), self.s["aspect"])
+        else:
+            self.scn.render.resolution_x, self.scn.render.resolution_y = size
+            self.scn.render.resolution_percentage = 100
+        pts = []
+        for oid in members:
+            pts += self.occurrence_corners(oid)
+        mn, mx = aabb_of(pts); ctr = (mn + mx) / 2
+        d = Vector(stands).normalized()
+        # the eye sits outside the whole scene, so nothing is cut by the camera plane
+        self.aim(ctr + d * max(self.scene_radius * 4, (mx - mn).length * 4, 1e-3), ctr, Vector(up))
+        framed = self.fit(pts, "orthographic", self.s["fill"])
+        self.place_floor([self.obj_of[oid] for oid in members], "still")
+        path, secs = self.render_to(view_id, self.samples())
+        parts = {}
+        for oid in members:
+            pid = self.scene.occurrences[oid].part_id
+            parts[pid] = parts.get(pid, 0) + 1
+        rec = self.view_record(view_id, path, secs, kind="still", group_id=group, visible=members,
+                               stands=[round(v, 4) for v in d], up=[float(v) for v in up], parts=parts,
+                               poses="canonical", exploded=False, framed=framed, extent_m=[round(v, 4) for v in (mx - mn)],
+                               note="a picture outside a manual: occurrences at their CAD poses in their looks; "
+                                    "not an assembly step; no sequence, fasteners or tool access implied")
+        self.restore(); self.verify_restored(view_id)
+        return rec
+
     def render_joint(self, spec):
         """A close-up of one project joint: the listed occurrences framed alone
         at their canonical poses, the rest of the context assembly subdued
@@ -971,10 +1036,12 @@ class Renderer:
             vid = f"step-{st.index:02d}-{slug(st.step.id)}"
             step_states[vid] = (st.added, st.before); step_states[vid + "-result"] = (st.added, st.before)
         budget = self.s["lines"]["preview_max_triangles" if self.preview else "max_triangles"]
+        # what the earlier receipt drew every part with (None when it recorded none), what it is drawn with now
+        look_states = (reuse.get("part_looks"), self.looks, {oid: occ.part_id for oid, occ in self.scene.occurrences.items()}) if reuse else None
         for view_id, fn in self.plan(groups, joints, exploded):
             wanted = not only or view_id in only
             if reuse is not None and view_id in old and not (only and view_id in only):
-                reason = stale_reason(old[view_id], joint_specs, self.lines_enabled, budget, exploded, instructions_changed, step_states)
+                reason = stale_reason(old[view_id], joint_specs, self.lines_enabled, budget, exploded, instructions_changed, step_states, look_states)
                 if reason is None:
                     rec = self.reuse_view(old[view_id], reuse)
                     views.append(rec)
@@ -991,6 +1058,23 @@ class Renderer:
             if not rec.get("framed", True):
                 self.checks["problems"].append(f"{view_id}: framed content does not fit the image")
         return views, missing
+
+
+def read_meshes(meshes_path, project):
+    """The CAD stage's receipt, refused when it was made from other geometry
+    or reported problems. Meshes depend on the scene and the asset files only:
+    a changed inventory, supplement, instruction file or finish does not call
+    for a new CAD stage."""
+    meshes = receipts.read_json(meshes_path)
+    meshes["_path"] = str(Path(meshes_path).resolve())
+    if meshes.get("kind") != "mechanical-docs-mesh-receipt":
+        raise SystemExit(f"{meshes_path}: not a mesh receipt")
+    stale = {k: v for k, v in project.geometry_input_hashes().items() if meshes["input_hashes"].get(k) != v}
+    if stale:
+        raise SystemExit(f"{meshes_path} was made from different geometry inputs ({sorted(stale)}); re-run the CAD stage")
+    if not meshes.get("all_checks_passed"):
+        raise SystemExit(f"{meshes_path}: the CAD stage reported problems; not rendering unchecked geometry")
+    return meshes
 
 
 def main(argv):
@@ -1018,17 +1102,7 @@ def main(argv):
     except ManifestError as e:
         print(e, file=sys.stderr)
         return 2
-    meshes = receipts.read_json(meshes_path)
-    meshes["_path"] = str(meshes_path.resolve())
-    if meshes.get("kind") != "mechanical-docs-mesh-receipt":
-        raise SystemExit(f"{meshes_path}: not a mesh receipt")
-    # meshes depend on the scene and the asset files only; a changed inventory,
-    # supplement or instruction file does not call for a new CAD stage
-    stale = {k: v for k, v in project.geometry_input_hashes().items() if meshes["input_hashes"].get(k) != v}
-    if stale:
-        raise SystemExit(f"{meshes_path} was made from different geometry inputs ({sorted(stale)}); re-run the CAD stage")
-    if not meshes.get("all_checks_passed"):
-        raise SystemExit(f"{meshes_path}: the CAD stage reported problems; not rendering unchecked geometry")
+    meshes = read_meshes(meshes_path, project)
     settings, settings_path = load_settings(project.dir)
     groups = []
     for g in list(settings["inspection_groups"]) + cli_groups:
@@ -1072,7 +1146,7 @@ def main(argv):
         if reasons:
             raise SystemExit(f"--reuse: cannot reuse {rp}: " + "; ".join(reasons))
         reuse = {"dir": str(reuse_dir), "receipt_path": str(rp), "views": old["views"], "settings_sha256": old.get("settings_sha256"),
-                 "generated_at_utc": old.get("generated_at_utc"), "blender": old.get("blender")}
+                 "generated_at_utc": old.get("generated_at_utc"), "blender": old.get("blender"), "part_looks": old.get("part_looks")}
     t0 = time.time()
     r = Renderer(project, meshes, settings, out_dir, preview, engine, lines)
     views, missing = r.run(only, groups, reuse, joints, exploded, instructions_changed if reuse else False)
@@ -1088,6 +1162,7 @@ def main(argv):
         "native_up_axis": project.scene.native_up_axis, "occurrences": len(project.scene.occurrences), "parts": len(project.scene.parts),
         "input_hashes": project.input_hashes(), "meshes_json_sha256": receipts.sha256_file(meshes_path),
         "mesh_hashes": {pid: rec["mesh"]["sha256"] for pid, rec in meshes["parts"].items()},
+        "part_looks": r.looks,
         "partial": bool(missing), "missing_views": missing, "inventory_only": project.instructions is None,
         "build_scope": None if project.build_scope is None else {"file": str(project.build_scope.file.relative_to(project.dir)), "sha256": project.build_scope.sha256, "phase": project.build_scope.phase,
                                                                    "deferred_steps": [st.step.id for st in r.states if st.deferred], "deferred_occurrences": project.build_scope.deferred_ids(project.scene)},

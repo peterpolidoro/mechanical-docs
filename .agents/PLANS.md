@@ -10,61 +10,112 @@ The direction of the wider mechanical CAD work is in the sibling
 `mechanical-cad` repository (`docs/direction.md`). Finished checkpoints, with
 their measurements and evidence runs, are in .agents/HISTORY.md.
 
-## Current state (2026-11-10)
+## Current state (2026-11-19)
 
 - The pipeline is implemented end to end: manifest loader, FreeCAD mesh stage,
   Blender render stage, optional viewer export, document stage (HTML and Typst
-  PDF from one `manual.json`), output checker. README.md lists the commands and
+  PDF from one `manual.json`), output checker, and since 2026-11-19 pictures
+  of a scene outside a manual. README.md lists the commands and
   docs/next-agent.md the modules.
-- Three synthetic fixtures build end to end. The enclosure snapshot (37 parts,
-  155 occurrences) was last built on 2026-10-23 as the draft phase-1 manual:
-  compact PDF 59 pages, appendix 77 pages, 33 checks passed each. That package
-  is published by the enclosure project; nothing of it is tracked here.
-- Everything the enclosure manual says is `draft`. Its step order was written by
-  the project and has not been reviewed. Peter is assembling the enclosure from
-  it and taking notes.
-- Run on 2026-11-10: the pure-Python suite, 124 passed and 2 skipped (the two
-  FreeCAD-gated tests, outside the CAD role), before and after PyYAML was taken
-  out of the base and publish Guix roles (nothing imports it). Not run that day:
-  the fixtures, the CAD stage, any render or manual build.
-- Layout (`mechanical-cad/docs/layout-proposal.md`; Peter decided its three
-  choices on 2026-11-11: two roots, readable keys, AP242 for exported files.
-  An AP242 file also holds the bodies hidden in the native part; the flatten
-  step leaves them out of the scene's assets, so nothing changes here): the
-  enclosure is to be re-exported as one directory per Vault file, and this
-  pipeline keeps reading a `scene.json`, then written by a flatten step in
-  `mechanical-cad`. No change is planned here for it. Render reuse is gated on
-  the hashes of the scene and asset files, so a re-keyed or re-exported project
-  renders every view once more; that one full render is planned after the
-  re-export. On 2026-11-10 a dry-run conversion of the enclosure was flattened
-  by `mechanical-cad` and loaded here with `inspect`, with the phase-1
-  manifests re-keyed to the new part ids: same counts, same finding, same
-  inventory, build scope and steps as the original project. Only `inspect`
-  ran; nothing was meshed or rendered.
+- Three synthetic fixtures build end to end; all three were built on
+  2026-11-19 at preview quality with the Guix Blender, and all their checks
+  passed.
+- **The enclosure.** Its published manual is the draft phase-1 package of
+  2026-10-23 (compact PDF 59 pages, appendix 77 pages, 33 checks passed
+  each), published by the enclosure project; nothing of it is tracked here.
+  Everything it says is `draft`; its step order was written by the project
+  and has not been reviewed. Peter is assembling the enclosure from it and
+  taking notes. The project was converted to the layout of `mechanical-cad`
+  and merged on 2026-11-12: its scene is now flattened there
+  (`make reference-scene` in the project), with readable part keys and AP242
+  files. This pipeline ran on the converted project that day, the whole of
+  it at preview quality (staging, inspect, meshes, 88 renders, manual,
+  check: all passed), and the manual has the steps, joints, quantities and
+  groups of the published one. No full-quality render has been made of it.
+  The mesh script cannot be given `--max-triangles` under FreeCADCmd 1.1.3,
+  which takes a dashed option after `--pass` for its own; the default is the
+  value the project's recipe asked for.
+- **Finishes (2026-11-19).** Peter decided that day that what a picture draws
+  each part with is one hand-edited file for the whole project
+  (`finishes.toml`, in `mechanical-cad`'s layout). `mechanical-cad`'s flatten
+  step derives `finishes.json` from it beside `scene.json`, and this
+  pipeline reads that file: a part is drawn in the look `render.json` names
+  for it, else in its finish, else in the default look (`looks.py`). A
+  finish is a colour written in sRGB, how metallic, how rough and how
+  opaque; a translucent part shows what lies behind it. The file is a render
+  input and no geometry input. The render receipt records what every part
+  was drawn with, and `--reuse` judges every view by the parts it shows in
+  their own looks, so a changed finish, or a changed `looks` entry, renders
+  only those views again. On the two-bases fixture, 11 views: a changed
+  finish of the base rendered 5 and copied 6; a changed finish of the pin,
+  which `render.json` overrides, rendered none. docs/input-contract.md,
+  "Finishes", is the contract.
+- **A picture outside a manual (2026-11-19).** `mechanical_docs/still.py`
+  draws a scene alone, or one subassembly of it, from a named side, with no
+  inventory and no instructions; the CAD stage meshes such a directory. The
+  view names are those of `mechanical-cad`'s `tools/picture.py`. It has its
+  own exposure (`still_exposure`, -2.5 stops): the studio of the render
+  stage lights a face that looks up about seven times as brightly as its
+  colour, so that at exposure 0 a mid-grey finish is white on top. A
+  manual's own views keep exposure 0.
+- Run on 2026-11-19: the pure-Python suite, 156 passed and 3 skipped; with
+  FreeCAD, 159 passed. Rendered that day with Cycles and with EEVEE: stills
+  of the two-bases fixture and of a scratch scene. And of the enclosure,
+  from its scene flattened by `mechanical-cad` with the project's draft
+  finishes into a scratch directory and meshed there (37 parts, every check
+  passed), with Cycles at preview quality, 1200 x 900: the whole enclosure,
+  155 occurrences, in 10 s without outlines (2.4 million visible triangles
+  are over the preview budget for them), and one tank support frame alone,
+  its clear tank and platform seen through, with outlines, in 225 s. Not
+  run: `viewer.py` (only a message changed in it), a manual with Cycles, a
+  manual of a project that has finishes other than the fixture, a
+  full-quality render of anything but stills of a fixture.
 
 ## Next work
 
 1. Peter's notes from the physical build and his corrected `instructions.json`.
-   Re-render with `--reuse` on the latest receipt (only the overview and the
-   steps whose state changed are rendered), rebuild both manuals, run `check`,
-   inspect the changed pages. Publication into the project is the project's
-   step (`assembly/publish_manual.py` there).
+   Render the converted project at full quality (its part ids and files
+   changed with the conversion, so every view is rendered once), rebuild
+   both manuals, run `check`, inspect the changed pages. After that a
+   corrected instruction file needs `--reuse` only. Publication into the
+   project is the project's step (`assembly/publish_manual.py` there).
 2. Whatever his notes ask of the documents themselves (cards, labels, views,
    step pages). Nothing is known yet.
-3. After the enclosure is converted and re-exported: one full render
-   from the flattened scene, and a comparison of that manual with today's by
-   parts, quantities, steps and checks.
+3. How a manual's own views are exposed when a project has finishes. With
+   the studio as it is, a finish lighter than a dark grey comes out white on
+   top in every view of a manual, as the palette's light entries do. Until
+   Peter has seen it and said what he wants, a project's finishes are for
+   stills, and the enclosure's recipe does not hand `finishes.json` to the
+   manual.
+4. Motion, stage 7.2 of `mechanical-cad`'s plan: a turntable, an exploded
+   sequence that follows the manual's steps, a joint moved through its
+   range, each as video. The first two need nothing more from the layout;
+   the third waits for joints and poses as records there.
 
 ## Open items
 
 Proposed to Peter on 2026-11-10, not approved, not started:
 
 - A single-part preview: render one STEP without a hand-written scene, so
-  authored parts can be looked at with this renderer.
-- Reading the project's `materials.json` for appearances (assigned to this
-  pipeline by `vault-cad-tools/docs/authoring-and-materials.md`, section 5).
+  authored parts can be looked at with this renderer. Since then
+  `mechanical-cad`'s `tools/picture.py` draws a part without this pipeline,
+  and `still.py` draws a scene alone; one part through this renderer still
+  needs a scene written for it.
 - Taking the STEP validity, unit and volume checks of `cad_mesh.py` from
   `mechanical-cad` once it has them.
+
+Overtaken: reading the project's `materials.json` for appearances (proposed
+the same day). A project's finishes are what gives a part its look.
+
+Left by the finishes work of 2026-11-19:
+
+- A finish belongs to a part. A finish for one body of a part or for one
+  occurrence has no place, in the layout or here.
+- The viewer GLBs still carry one flat material.
+- EEVEE draws a translucent finish by blending and shows blotches in the
+  shadow near it; Cycles is the reference for such a part.
+- No translucent finish has been tried on anything larger than a fixture
+  with the manual's views.
 
 Carried from earlier checkpoints:
 

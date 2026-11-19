@@ -40,9 +40,10 @@ DEFAULTS = {
     # A floor just under the lowest visible point of a view, catching contact
     # shadows onto the transparent film (Cycles only; EEVEE has no shadow catcher).
     # The catcher costs Cycles a second full pass (about 4x the view time), so by
-    # default only the part thumbnails and the overview get it; add "step" and
+    # default only the part thumbnails, the overview and the other whole views
+    # get it (a picture outside a manual, "still", among them); add "step" and
     # "step-result" to `views` for the step images too.
-    "floor": {"enabled": "auto", "views": ["part-thumbnail", "overview", "exploded", "group", "joint"], "color": [0.46, 0.47, 0.49], "roughness": 0.9, "size_factor": 40},
+    "floor": {"enabled": "auto", "views": ["part-thumbnail", "overview", "exploded", "group", "joint", "still"], "color": [0.46, 0.47, 0.49], "roughness": 0.9, "size_factor": 40},
     "long_side_px": 1600,
     "preview_long_side_px": 480,
     "thumbnail_px": 600,
@@ -90,6 +91,11 @@ DEFAULTS = {
     "view_transform": "Standard",
     "look": "None",
     "exposure": 0.0,
+    # A picture outside a manual (still.py) is exposed by this many stops instead. The studio is
+    # high-key: it lights a face that looks up about seven times as brightly as its colour, so
+    # that a manual's parts are light shapes with dark outlines, and at exposure 0 a mid-grey
+    # finish comes out white. At -2.5 a colour comes out about as its finish gives it.
+    "still_exposure": -2.5,
     "world": {"color": [0.85, 0.86, 0.88], "strength": 0.9},
     "studio": {
         "key": {"direction": [-1.0, -0.7, 1.3], "distance": 3.0, "size": 2.0, "watts": 20},
@@ -121,7 +127,7 @@ DEFAULTS = {
 # render.json may set these top-level keys; palette entries may be added, not the whole palette replaced.
 OVERRIDABLE = {"engine", "samples", "preview_samples", "cycles_samples", "cycles_preview_samples", "cycles_adaptive_threshold", "cycles_max_bounces", "cycles_persistent_data", "floor", "long_side_px", "preview_long_side_px", "thumbnail_px", "aspect", "fill",
                "thumbnail_fill", "thumbnail_direction", "thumbnail_long_aspect", "thumbnail_long_px", "thumbnail_long_aspect_px", "thumbnail_long_direction", "thumbnail_end_view",
-               "inspection_groups", "group_direction", "group_fill", "joint_views", "joint_direction", "joint_fill", "joint_context_style", "overview_direction", "exploded_view", "film_transparent", "view_transform", "look", "exposure", "world", "studio",
+               "inspection_groups", "group_direction", "group_fill", "joint_views", "joint_direction", "joint_fill", "joint_context_style", "overview_direction", "exploded_view", "film_transparent", "view_transform", "look", "exposure", "still_exposure", "world", "studio",
                "default_look", "looks", "context_color", "step_context_alpha", "lines", "arrow", "palette", "note", "schema_version"}
 
 
@@ -235,6 +241,9 @@ def load_settings(project_dir):
         raise SettingsError(f"render.json: joint_context_style must be one of {JOINT_CONTEXT_STYLES}")
     s["joint_views"] = check_joint_views(s["joint_views"], s["joint_context_style"])
     s["exploded_view"] = check_exploded_view(s["exploded_view"])
+    for k in ("exposure", "still_exposure"):
+        if not isinstance(s[k], (int, float)) or isinstance(s[k], bool):
+            raise SettingsError(f"render.json: {k} must be a number of stops")
     a = s["step_context_alpha"]
     if not isinstance(a, (int, float)) or isinstance(a, bool) or not 0.0 < a <= 1.0:
         raise SettingsError("render.json: step_context_alpha must be a number in (0, 1]")

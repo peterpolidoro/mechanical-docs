@@ -67,3 +67,22 @@ def test_wrong_manifest_unit_is_refused(tmp_path):
     assert "manifest extent [10.0, 10.0, 30.0] mm differs from the imported extent [254.0, 254.0, 762.0] mm" in problems
     assert rec["parts"]["base-cm"]["checks"]["passed"] and rec["parts"]["pin-mm"]["checks"]["passed"]
     assert "exit status 1" in log
+
+
+def test_a_scene_alone_is_meshed_as_a_project_is(tmp_path):
+    """A directory with a scene and no inventory, as mechanical-cad's flatten step writes one: the same meshes,
+    and a receipt whose inputs are the scene, its assets and the finishes."""
+    whole, _ = run_stage(FIX, tmp_path / "meshes-project")
+    alone = tmp_path / "scene"
+    alone.mkdir()
+    shutil.copy(FIX / "scene.json", alone)
+    shutil.copytree(FIX / "assets", alone / "assets")
+    finishes = {"schema_version": 1, "scene": "scene.json", "finishes": {"brass": {"color": "#c9a13c", "metallic": 1.0, "roughness": 0.35, "opacity": 1.0}},
+                "parts": {pid: "brass" for pid in whole["parts"]}}
+    (alone / "finishes.json").write_text(json.dumps(finishes))
+    rec, log = run_stage(alone, tmp_path / "meshes-scene")
+    assert rec["all_checks_passed"] and "exit status 0" in log
+    assert sorted(rec["input_hashes"]) == sorted(["scene.json", "finishes.json"] + [f"assets/{p.name}" for p in (FIX / "assets").iterdir()])
+    assert {pid: p["mesh"]["sha256"] for pid, p in rec["parts"].items()} == {pid: p["mesh"]["sha256"] for pid, p in whole["parts"].items()}
+    # the finishes are no geometry: the scene and the assets hash as they do in the project
+    assert all(rec["input_hashes"][k] == whole["input_hashes"][k] for k in rec["input_hashes"] if k != "finishes.json")

@@ -5,12 +5,14 @@ and structured project information. The first use case is a visual parts invento
 and LEGO-style assembly manual, with matching web and printable PDF versions.
 Future uses include maintenance, replacement, disassembly and inspection guides.
 
-**Status (2026-11-10): the first production project builds as a draft manual;
+**Status (2026-11-19): the first production project builds as a draft manual;
 nothing is reviewed or physically validated.** A validated draft-1 manifest
 loader (scene, inventory with an optional stock record, instructions,
 `supplement.json` for items not modelled in CAD, `build-scope.json` for one
-build phase), a FreeCAD STEP-to-mesh stage, a Blender render stage (Cycles with
-OpenImageDenoise through the `bpy` wheel, EEVEE on the Guix Blender), an
+build phase, `finishes.json` for what a picture draws each part with), a
+FreeCAD STEP-to-mesh stage, a Blender render stage (Cycles with
+OpenImageDenoise through the `bpy` wheel, EEVEE on the Guix Blender), pictures
+outside a manual from a scene alone (`still.py`, since 2026-11-19), an
 optional viewer export, and a document stage that writes one `manual.json` and
 generates HTML and a Typst PDF from it, with an output checker. Three synthetic
 fixtures build end to end. The enclosure snapshot (37 parts, 155 occurrences)
@@ -66,6 +68,29 @@ python3 -m mechanical_docs manual examples/three-part-fixture --renders build/re
 python3 -m mechanical_docs check build/manual
 ```
 
+A picture outside a manual needs a scene and no more. `mechanical-cad`'s
+flatten step writes a directory with `scene.json`, its assets and, when the
+project has finishes, `finishes.json`; the CAD stage meshes it as it is, and
+`still.py` draws it, or one subassembly of it, from a named side:
+
+```sh
+FreeCADCmd mechanical_docs/cad_mesh.py --pass SCENE_DIR build/meshes
+blender -b --python mechanical_docs/still.py -- SCENE_DIR build/meshes/meshes.json build/stills --views iso,+z [--group ASSEMBLY_ID] [--size 1600x1200] [--exposure -2.5] [--preview] --engine BLENDER_EEVEE_NEXT
+pixi run -e render still SCENE_DIR build/meshes/meshes.json build/stills --views iso,+z      # Cycles, the reference look
+```
+
+The views are `iso`, `iso-back`, `below`, `below-back`, `+x`, `-x`, `+y`,
+`-y`, `+z` and `-z`, the names and cameras of `mechanical-cad`'s
+`tools/picture.py`; `--direction X,Y,Z` stands the camera anywhere else. The
+pictures are `still-<view>.png` with a receipt, `stills.json`.
+
+A part is drawn in the look `render.json` names for it (`looks`), else in
+its finish of the optional `finishes.json` (a colour, how metallic, how
+rough, how opaque; derived by `mechanical-cad` from the project's own
+`finishes.toml`), else in the default look. A still is exposed to show those
+colours (`still_exposure`); a manual's views keep the high-key studio, in
+which light finishes come out white with dark outlines.
+
 `--groups` (or `inspection_groups` in `render.json`) renders named subassemblies
 alone as inspection views; `joint_views` in `render.json` renders per-joint
 close-ups (the listed occurrences framed, the rest of their context faded or
@@ -78,7 +103,8 @@ offsets plus anchors for a web model viewer; `--reuse` copies views from an earl
 the same scene, assets, instructions, meshes and engine (inventory and
 supplement changes never invalidate it), so changing a few thumbnails does not
 mean rendering the whole assembly again (each copied view is marked
-`reused_from` in the receipt). `--appendix` prints the technical appendix;
+`reused_from` in the receipt), and a changed finish or look renders again
+only the views that show its part. `--appendix` prints the technical appendix;
 without it the printed document stays compact and the full identities live in
 `manual.json` and `build-receipt.json`. Two occurrences of one part at the
 same pose are kept and counted but reported as a finding on the status block
@@ -95,7 +121,7 @@ note on the status block; CAD counts never change.
 Every stage writes a receipt with input hashes and tool versions and refuses
 inputs whose hashes do not match the receipt it consumes, for the inputs that
 stage depends on (meshes depend on the scene and assets; images on those plus
-the instructions; the manual re-reads the inventory and supplement itself, so
+the instructions and the finishes; the manual re-reads the inventory and supplement itself, so
 a recorded count or a new supplement row needs a new manual, not a render). `build/` is ignored
 by Git; representative outputs go to the shared evidence area.
 

@@ -1,7 +1,7 @@
 {
   "schema_version": "draft-1",
+  "note": "Illustration settings only. The base has no entry under looks and is drawn in its finish of finishes.json; the pin has one, and that holds over its finish.",
   "looks": {
-    "base": "grey-plastic",
     "pin": "red-plastic"
   }
 }

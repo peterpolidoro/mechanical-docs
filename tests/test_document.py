@@ -193,7 +193,7 @@ def test_a_scene_from_a_cad_export_says_what_its_quantities_are(rendered, kind, 
 def test_model_rejects_stale_or_partial_receipt(rendered):
     project, renders, receipt = rendered
     bad = dict(receipt); bad["input_hashes"] = dict(receipt["input_hashes"]); bad["input_hashes"]["scene.json"] = "f" * 64
-    with pytest.raises(document.DocumentError, match="different scene, assets or instructions"):
+    with pytest.raises(document.DocumentError, match="different scene, assets, instructions or finishes"):
         document.build_model(project, bad)
     # a changed inventory or supplement (stock count, new row) does not stale the images
     ok = dict(receipt); ok["input_hashes"] = dict(receipt["input_hashes"]); ok["input_hashes"]["inventory.json"] = "e" * 64; ok["input_hashes"]["supplement.json"] = "d" * 64

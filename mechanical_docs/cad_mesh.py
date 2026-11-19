@@ -2,6 +2,9 @@
 
     FreeCADCmd mechanical_docs/cad_mesh.py --pass PROJECT_DIR OUT_DIR [--linear-deflection MM] [--angular-deflection DEG] [--max-triangles N]
 
+PROJECT_DIR is a project (scene, inventory and the rest) or a directory that
+holds a scene alone, as mechanical-cad's flatten step writes one.
+
 For every part of the validated scene: read its STEP, check it is a valid
 closed solid, measure its bounds and volume, tessellate it face by face
 (smooth normals within a face, sharp edges between faces), check the mesh's
@@ -35,7 +38,7 @@ sys.path.insert(0, str(HERE.parent))
 from mechanical_docs import gltf, receipts, stepinfo  # noqa: E402
 from mechanical_docs.names import slug  # noqa: E402
 from mechanical_docs import transforms as T  # noqa: E402
-from mechanical_docs.manifest import ManifestError, load_project  # noqa: E402
+from mechanical_docs.manifest import ManifestError, load_project, load_scene_only  # noqa: E402
 
 import FreeCAD as App  # noqa: E402  (only inside FreeCAD)
 import Part  # noqa: E402
@@ -243,7 +246,8 @@ def main(argv):
         else:
             raise SystemExit(f"unknown argument {argv[i]}")
     try:
-        project = load_project(project_dir)
+        # a directory that holds a scene and no inventory is meshed as it is: a picture outside a manual needs no more
+        project = load_project(project_dir) if (project_dir / "inventory.json").exists() else load_scene_only(project_dir)
     except ManifestError as e:
         print(e, file=sys.stderr)
         return 2

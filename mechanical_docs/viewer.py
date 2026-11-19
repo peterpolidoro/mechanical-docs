@@ -178,7 +178,7 @@ def main(argv):
     rr = receipts.read_json(rp)
     skip = project.non_render_inputs()
     if {k: v for k, v in rr.get("input_hashes", {}).items() if k not in skip} != project.render_input_hashes():
-        raise SystemExit(f"{rp} was made from a different scene, assets or instructions; render first")
+        raise SystemExit(f"{rp} was made from a different scene, assets, instructions or finishes; render first")
     if rr.get("mesh_hashes") != {pid: rec["mesh"]["sha256"] for pid, rec in meshes["parts"].items()}:
         raise SystemExit(f"{rp} was rendered from different meshes")
     exploded = next((v for v in rr["views"] if v.get("kind") == "exploded"), None)

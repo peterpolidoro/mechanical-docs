@@ -33,7 +33,7 @@ import sys
 from pathlib import Path
 
 from . import explode, receipts
-from .manifest import ManifestError, load_project
+from .manifest import FINISHES_FILE, ManifestError, load_project
 from .names import slug
 from .procedure import derive_states
 from . import html as html_out
@@ -331,11 +331,13 @@ def build_model(project, render_receipt, meshes_receipt=None, appendix=False, ho
     views = {v["id"]: v for v in render_receipt["views"]}
     if render_receipt.get("partial"):
         raise DocumentError("render receipt is partial (--views without --reuse); render every view before building the manual")
-    # the images depend on the scene, the assets and the instructions; a later stock
-    # count or supplement row needs a new manual, not a new render
+    # the images depend on the scene, the assets, the instructions and the finishes; a later
+    # stock count or supplement row needs a new manual, not a new render
     stale = {k: v for k, v in project.render_input_hashes().items() if render_receipt["input_hashes"].get(k) != v}
+    if project.finishes is None and FINISHES_FILE in render_receipt["input_hashes"]:
+        stale[FINISHES_FILE] = None         # drawn with finishes the project no longer has
     if stale:
-        raise DocumentError(f"render receipt was made from a different scene, assets or instructions: {sorted(stale)}")
+        raise DocumentError(f"render receipt was made from a different scene, assets, instructions or finishes: {sorted(stale)}")
     if not render_receipt.get("all_checks_passed"):
         raise DocumentError("render receipt reports failed checks; fix the renders first")
 

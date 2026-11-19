@@ -29,9 +29,26 @@ sibling repository before planning anything here. In short:
   taking notes. Those notes, and his corrected `instructions.json`, are the next
   real input for this repository.
 - Licence: 3-clause BSD, copyright Howard Hughes Medical Institute (`LICENSE`).
+- Finishes and pictures outside a manual (2026-11-19, stage 7 of
+  `mechanical-cad`'s plan; Peter decided that a project's finishes are one
+  hand-edited file for the whole project). `mechanical-cad` derives
+  `finishes.json` from it beside the scene; this pipeline reads that file
+  (`manifest.py` `load_finishes`), draws a part in its finish unless
+  `render.json` names a look for it (`looks.py`), records the look of every
+  part in the render receipt and judges reuse by it (`reuse.py`), and draws a
+  scene alone from a named side (`still.py`, `views.py`; the CAD stage meshes
+  a directory without an inventory). Shown on `examples/two-bases-fixture`,
+  whose base is translucent. docs/input-contract.md, "Finishes", has the
+  contract and what the high-key studio does to a finish's colour. Not done:
+  motion (a turntable, an exploded sequence, a moved joint), a finish per
+  body or per occurrence, finishes in the viewer GLBs (one flat material
+  still), and a look at how a manual's own views should be exposed when a
+  project has finishes.
 - Still open here: a single-part preview (render one STEP without a
-  hand-written scene) and reading the project's `materials.json` for
-  appearances. Both were proposed on 2026-11-10; neither is approved or started.
+  hand-written scene), proposed on 2026-11-10 and neither approved nor
+  started; `mechanical-cad`'s `tools/picture.py` draws a part without this
+  pipeline. Reading the project's `materials.json` for appearances, proposed
+  the same day, is overtaken by the finishes above.
 - The shared directory's location on Peter's workstation is in the ignored
   `.agents/handoff.local.md`. Paths in older notes and messages may no longer
   exist there.
@@ -46,13 +63,17 @@ code.
   free-form ids), `stepinfo.py` (declared STEP unit), `transforms.py`,
   `procedure.py`, `gltf.py` (single-mesh and multi-node GLB writers),
   `geometry.py`, `receipts.py`, `reuse.py` (which earlier views are stale
-  under new settings), `explode.py` (which top-level groups the exploded
+  under new settings or looks), `looks.py` (what each part is drawn with:
+  the look `render.json` names, else its finish, else the default),
+  `views.py` (the named camera positions of a still), `explode.py` (which
+  top-level groups the exploded
   view moves and by how much), `render_settings.py` (looks, budgets,
   long-part thumbnail rules, `inspection_groups`, `joint_views`,
   `exploded_view`), `cad_mesh.py` (FreeCADCmd, triangle budget), `render.py`
   (Blender, Cycles default, line budget, wide thumbnails and end views for long
   parts, `--groups` subassembly inspection views, `joint_views` close-ups,
-  the exploded view, `--reuse` of earlier views), `viewer.py` (bpy: the two
+  the exploded view, `--reuse` of earlier views), `still.py` (Blender: a
+  picture of a scene alone, outside a manual), `viewer.py` (bpy: the two
   viewer GLBs with decimation and anchors), `document.py` + `html.py` + `typst.py`
   (front page with the overview and the exploded view with page references,
   picture-led parts cards, supplementary items, subassembly pages with the
@@ -60,13 +81,15 @@ code.
   compact build record, `viewer/hotspots.json`, the build scope's phase
   quantities, checklist and step chapters, `--appendix`), `checks.py`,
   `cli.py` (`inspect`, `inventory-template`, `manual`, `check`). `tests/` has
-  124 pure-Python tests (all passing on 2026-11-10) plus two in
+  156 pure-Python tests (all passing on 2026-11-19) plus three in
   `tests/test_cad_stage.py`, which run FreeCAD on the units fixture when
   `FreeCADCmd` is on PATH (the CAD role) and are skipped otherwise.
 - `examples/three-part-fixture/` (now with `supplement.json`: three synthetic
   supplementary rows, a `render.json` with the `pin-pair` inspection view,
   one `pin_to_base` joint close-up and an exploded-view spread, and a
-  `build-scope.json` deferring pin B), `examples/two-bases-fixture/` and
+  `build-scope.json` deferring pin B), `examples/two-bases-fixture/` (since
+  2026-11-19 with a `finishes.json`: a translucent base, and a pin whose
+  finish `render.json` overrides) and
   `examples/units-fixture/` (a real inch STEP and a centimetre STEP derived from
   the millimetre fixture by rewriting the unit context, in an inch, +Y-up scene
   with a nested group), all building with `tools/build-fixture.sh`.

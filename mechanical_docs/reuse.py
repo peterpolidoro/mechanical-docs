@@ -9,9 +9,23 @@ differs from the record, an exploded view whose offsets or explicit direction
 changed, the overview and the steps when the instructions changed, a step
 whose additions or installed-before set changed, and any view drawn without outlines that the current
 line budget would now outline (a lower budget never discards an outlined
-image: the budget caps cost, it is not a look). Other appearance changes
-(looks, group direction, thumbnail rules, --no-lines) are not detected: name
-those views with --views.
+image: the budget caps cost, it is not a look), and any view that shows a part
+in a look other than the one it was drawn with.
+
+Looks. A receipt records for every part the look it was drawn with
+(looks.py: a palette entry named in render.json, a finish of finishes.json,
+or the default, with its numbers). A view is stale when a part it shows in
+its own look has another look now: a thumbnail or an end view shows its part;
+the overview, the exploded view, a subassembly view and a still show every
+visible occurrence's part; a joint close-up shows its subject occurrences
+(the context is flat grey); a step shows what it adds (what was installed
+before is ghosted). An earlier receipt without that record cannot tell what
+its parts were drawn with. Its views are taken as they always were, except
+those that show a part whose look now comes from finishes.json: that file did
+not exist for it, so they are rendered again.
+
+Other appearance changes (group direction, thumbnail rules, the studio,
+--no-lines) are not detected: name those views with --views.
 """
 from __future__ import annotations
 
@@ -21,7 +35,37 @@ def normalised(v):
     return [round(x / n, 4) for x in v] if n > 1e-12 else [0.0, 0.0, 0.0]
 
 
-def stale_reason(old, joint_specs, lines_enabled, budget, exploded=None, instructions_changed=False, step_states=None):
+def shown_in_look(old, part_of):
+    """The parts a view shows in their own looks, sorted. `old` is the view's
+    record and `part_of` maps an occurrence id to its part id."""
+    kind = old.get("kind")
+    if kind in ("part-thumbnail", "part-end"):
+        return [old["part_id"]] if old.get("part_id") is not None else []
+    if kind in ("step", "step-result"):
+        occurrences = old.get("highlighted") or []
+    elif kind == "joint":
+        occurrences = old.get("occurrence_ids") or []
+    else:                                   # overview, exploded, group, still: everything visible is in its look
+        occurrences = old.get("visible") or []
+    return sorted({part_of[o] for o in occurrences if o in part_of})
+
+
+def look_reason(old, looks):
+    """Why a view's looks make it stale, or None. `looks` is (the earlier
+    receipt's part looks or None when it recorded none, the current part
+    looks, occurrence id -> part id)."""
+    earlier, current, part_of = looks
+    for pid in shown_in_look(old, part_of):
+        now = current.get(pid)
+        if earlier is None:
+            if now is not None and now.get("source") == "finishes.json":
+                return f"the earlier receipt records no looks and {pid} now takes its look from finishes.json"
+        elif earlier.get(pid) != now:
+            return f"the look of {pid} changed"
+    return None
+
+
+def stale_reason(old, joint_specs, lines_enabled, budget, exploded=None, instructions_changed=False, step_states=None, looks=None):
     """None when `old` (a view record from an earlier receipt) can be reused
     under the current settings, else a short reason.
 
@@ -32,7 +76,8 @@ def stale_reason(old, joint_specs, lines_enabled, budget, exploded=None, instruc
     instructions_changed: the instructions file differs from the old receipt's
     (the overview camera and every step follow it). step_states: view id ->
     (added, before) of the current derivation, so a step whose cumulative state
-    changed (a build scope deferring an earlier step) is rendered again."""
+    changed (a build scope deferring an earlier step) is rendered again.
+    looks: see look_reason; None leaves looks out of the judgement."""
     if old.get("kind") == "overview" and instructions_changed:
         return "instructions changed (the overview uses the first step's camera)"
     if old.get("kind") in ("step", "step-result"):
@@ -75,6 +120,10 @@ def stale_reason(old, joint_specs, lines_enabled, budget, exploded=None, instruc
                 return "joint direction changed"
         elif old.get("direction_from_settings"):
             return "joint direction no longer set"
+    if looks is not None:
+        reason = look_reason(old, looks)
+        if reason is not None:
+            return reason
     # the budget is a cost cap, not a look: an image that already has outlines is
     # still right under a lower cap (the enclosure overview keeps its 32-minute
     # Freestyle lines); only newly affordable outlines make a copy stale

@@ -38,6 +38,7 @@ bpy = ">=4.5,<4.6"
 [feature.render.tasks]
 render = { cmd = "python mechanical_docs/render.py", description = "Render a project with the bpy wheel: pixi run render PROJECT MESHES_JSON OUT_DIR [--preview] [--engine E]" }
 render-fixtures = { cmd = "python mechanical_docs/render.py examples/three-part-fixture build/three-part-fixture/meshes/meshes.json build/three-part-fixture/renders && python mechanical_docs/render.py examples/two-bases-fixture build/two-bases-fixture/meshes/meshes.json build/two-bases-fixture/renders", description = "Full-quality renders of both fixtures (meshes from the FreeCAD stage must exist)" }
+still = { cmd = "python mechanical_docs/still.py", description = "A picture of a scene outside a manual: pixi run still SCENE_DIR MESHES_JSON OUT_DIR [--views iso,+z] [--group ID] [--preview]" }
 bpy-info = { cmd = "python tools/bpy_info.py", description = "Report the Blender version and whether this wheel's Cycles has OpenImageDenoise" }
 
 [environments]

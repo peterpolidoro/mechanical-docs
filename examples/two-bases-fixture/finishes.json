@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "scene": "scene.json",
+  "source": {
+    "kind": "synthetic",
+    "note": "written by hand for this fixture, in the form mechanical-cad's flatten step writes"
+  },
+  "finishes": {
+    "brass": {
+      "color": "#c9a13c",
+      "metallic": 1.0,
+      "roughness": 0.35,
+      "opacity": 1.0
+    },
+    "clear-acrylic": {
+      "color": "#bfe3ee",
+      "metallic": 0.0,
+      "roughness": 0.15,
+      "opacity": 0.35
+    }
+  },
+  "parts": {
+    "base": "clear-acrylic",
+    "pin": "brass"
+  }
+}

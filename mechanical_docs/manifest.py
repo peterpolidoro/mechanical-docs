@@ -23,6 +23,12 @@ undecided (conditional) and the phase's title and note. It never changes the
 scene or its CAD counts; it only labels what the documents print for the
 phase (this-build, conditional and deferred quantities, deferred and
 conditional steps).
+
+`finishes.json` (schema_version 1, optional) says what a picture draws each
+part with: named finishes (a colour, how metallic, how rough, how opaque) and
+one of them, or null, for every part of the scene. It is derived by the
+producer of the scene from the project's own record and is never edited here.
+It changes pictures only: no mesh, quantity, identity or order.
 """
 from __future__ import annotations
 
@@ -79,6 +85,13 @@ BUILD_SCOPE_FIELDS = {"schema_version", "scene", "phase", "title", "decided_by",
                       "conditional_groups", "backlight", "deferred_design", "note"}
 CONDITIONAL_FIELDS = {"id", "rule", "decided"}
 INCLUDED_WITH_FIELDS = {"scene_part": {"kind", "id"}, "kit": {"kind", "name"}}
+# finishes.json: what a picture draws each part with (written by mechanical-cad's flatten step, 2026-11-19)
+FINISHES_FILE = "finishes.json"
+FINISHES_SCHEMA_VERSION = 1
+FINISHES_FIELDS = {"schema_version", "scene", "source", "finishes", "parts"}
+FINISH_FIELDS = ("color", "metallic", "roughness", "opacity")
+FINISH_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+FINISH_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 SCALAR = (str, int, float, bool, type(None))
 
 
@@ -386,13 +399,28 @@ class BuildScope:
 
 
 @dataclass
+class Finishes:
+    source: dict
+    finishes: dict       # name -> {"color": "#rrggbb" (sRGB), "metallic", "roughness", "opacity"}
+    parts: dict          # every part id of the scene -> the name of its finish, or None when nobody has said
+    file: Path
+    sha256: str
+
+    def of(self, part_id):
+        """(name, finish) of a part, or None when it has none."""
+        name = self.parts.get(part_id)
+        return (name, self.finishes[name]) if name is not None and name in self.finishes else None
+
+
+@dataclass
 class Project:
     dir: Path
     scene: Scene
     instructions: Instructions | None
-    inventory: Inventory
+    inventory: Inventory | None      # None only for a scene loaded alone (load_scene_only): a picture needs no inventory
     supplement: Supplement | None = None
     build_scope: BuildScope | None = None
+    finishes: Finishes | None = None
 
     @property
     def has_instructions(self):
@@ -402,11 +430,14 @@ class Project:
         h = {str(self.scene.file.relative_to(self.dir)): self.scene.sha256}
         if self.instructions is not None:
             h[str(self.instructions.file.relative_to(self.dir))] = self.instructions.sha256
-        h[str(self.inventory.file.relative_to(self.dir))] = self.inventory.sha256
+        if self.inventory is not None:
+            h[str(self.inventory.file.relative_to(self.dir))] = self.inventory.sha256
         if self.supplement is not None:
             h[str(self.supplement.file.relative_to(self.dir))] = self.supplement.sha256
         if self.build_scope is not None:
             h[str(self.build_scope.file.relative_to(self.dir))] = self.build_scope.sha256
+        if self.finishes is not None:
+            h[str(self.finishes.file.relative_to(self.dir))] = self.finishes.sha256
         for p in self.scene.parts.values():
             h[str(p.asset.resolved.relative_to(self.dir))] = p.asset.sha256
         return h
@@ -414,8 +445,10 @@ class Project:
     def non_render_inputs(self):
         """Manifest files that cannot change any rendered image: the inventory
         (quantities and stock records) and the supplement (rows not modelled in
-        CAD). Everything else (scene, assets, instructions) can."""
-        names = {str(self.inventory.file.relative_to(self.dir)), "supplement.json", "build-scope.json"}
+        CAD). Everything else (scene, assets, instructions, finishes) can."""
+        names = {"inventory.json", "supplement.json", "build-scope.json"}
+        if self.inventory is not None:
+            names.add(str(self.inventory.file.relative_to(self.dir)))
         if self.supplement is not None:
             names.add(str(self.supplement.file.relative_to(self.dir)))
         if self.build_scope is not None:
@@ -425,7 +458,8 @@ class Project:
 
     def geometry_input_hashes(self):
         """The inputs that can change a mesh: the scene (parts, assets) and the
-        asset files; what the render stage compares with meshes.json."""
+        asset files; what the render stage compares with meshes.json. The
+        finishes are not among them: a changed colour calls for no new mesh."""
         keep = {str(self.scene.file.relative_to(self.dir))} | {str(p.asset.resolved.relative_to(self.dir)) for p in self.scene.parts.values()}
         return {k: v for k, v in self.input_hashes().items() if k in keep}
 
@@ -1126,11 +1160,78 @@ def load_build_scope(path, scene: Scene, chk=None):
                       list(deferred), groups, str(data.get("backlight", "")), list(dd), str(data.get("note", "")), path, sha256_file(path) if path.is_file() else "")
 
 
+def load_finishes(path, scene: Scene, chk=None):
+    """finishes.json: what a picture draws each part with. Every finish carries
+    its four fields, every part of the scene has an entry (the name of a
+    finish defined in the file, or null), and unknown fields are refused."""
+    own = chk is None
+    chk = chk or _Check()
+    path = Path(path)
+    data = _load_json(path, chk, "finishes", FINISHES_SCHEMA_VERSION)
+    if data is None:
+        chk.raise_if_any()
+    sv = data.get("schema_version")
+    chk(not isinstance(sv, bool), f"finishes: schema_version must be the integer {FINISHES_SCHEMA_VERSION}, got {sv!r}")
+    chk.fields(data, FINISHES_FIELDS, "finishes")
+    for key in ("scene", "finishes", "parts"):
+        chk(key in data, f"finishes: missing field {key!r}")
+    ref = data.get("scene")
+    if chk(isinstance(ref, str) and ref, "finishes.scene: expected the scene file's relative path"):
+        chk((path.parent / ref).resolve() == scene.file.resolve(), f"finishes.scene: {ref!r} is not the loaded scene {scene.file.name!r}")
+    source = chk.scalar_dict(data, "source", "finishes")
+
+    def unit(value, where, open_at_zero=False):
+        ok = isinstance(value, (int, float)) and not isinstance(value, bool) and (0.0 < value if open_at_zero else 0.0 <= value) and value <= 1.0
+        chk(ok, f"{where}: expected a number from 0 to 1" + (", above 0" if open_at_zero else "") + f", got {value!r}")
+        return float(value) if ok else None
+
+    finishes = {}
+    raw = data.get("finishes")
+    if not chk(isinstance(raw, dict), "finishes.finishes: expected an object of named finishes (may be empty)"):
+        raw = {}
+    for name, f in raw.items():
+        where = f"finishes.finishes[{name!r}]"
+        chk(FINISH_NAME.match(name) is not None, f"{where}: a finish's name is lower-case letters and digits in groups joined by single hyphens")
+        if not chk.fields(f, set(FINISH_FIELDS), where):
+            continue
+        missing = [k for k in FINISH_FIELDS if k not in f]
+        chk(not missing, f"{where}: missing field(s) {missing}; every field of a finish is explicit")
+        color = f.get("color")
+        if "color" in f and not chk(isinstance(color, str) and FINISH_COLOR.match(color) is not None,
+                                    f"{where}.color: expected an sRGB colour as #rrggbb, got {color!r}"):
+            color = None
+        metallic = unit(f["metallic"], where + ".metallic") if "metallic" in f else None
+        roughness = unit(f["roughness"], where + ".roughness") if "roughness" in f else None
+        opacity = unit(f["opacity"], where + ".opacity", open_at_zero=True) if "opacity" in f else None
+        if None not in (color, metallic, roughness, opacity):
+            finishes[name] = {"color": color.lower(), "metallic": metallic, "roughness": roughness, "opacity": opacity}
+    defined = set(raw)
+    parts = {}
+    raw_parts = data.get("parts")
+    if not chk(isinstance(raw_parts, dict), "finishes.parts: expected an object with an entry for every part of the scene"):
+        raw_parts = {}
+    for pid, name in raw_parts.items():
+        where = f"finishes.parts[{pid!r}]"
+        if not chk(pid in scene.parts, f"{where}: not a part of the scene"):
+            continue
+        if chk(name is None or (isinstance(name, str) and name in defined),
+               f"{where}: expected the name of a finish defined in this file, or null when nobody has said, got {name!r}"):
+            parts[pid] = name
+    if isinstance(data.get("parts"), dict):
+        without = [pid for pid in scene.parts if pid not in raw_parts]
+        chk(not without, f"finishes.parts: no entry for {without}; every part of the scene has one (null when it has no finish)")
+    if own:
+        chk.raise_if_any()
+    return Finishes(source, finishes, parts, path, sha256_file(path) if path.is_file() else "")
+
+
 def load_project(project_dir, scene="scene.json", instructions="instructions.json", inventory="inventory.json", root=None,
-                 require_instructions=False, supplement="supplement.json", build_scope="build-scope.json") -> Project:
+                 require_instructions=False, supplement="supplement.json", build_scope="build-scope.json",
+                 finishes=FINISHES_FILE) -> Project:
     """Load and validate a project directory: scene and inventory always, the
     instructions when the file exists (a project without a reviewed sequence
-    still yields a parts inventory), the supplement when the file exists.
+    still yields a parts inventory), the supplement, the build scope and the
+    finishes when their files exist.
     Raises ManifestError listing every problem. `root` is the directory asset
     paths may not escape; it defaults to the project directory.
     """
@@ -1146,8 +1247,25 @@ def load_project(project_dir, scene="scene.json", instructions="instructions.jso
     inv = load_inventory(d / inventory, sc, chk)
     sup = load_supplement(d / supplement, sc, chk) if (d / supplement).exists() else None
     bs = load_build_scope(d / build_scope, sc, chk) if (d / build_scope).exists() else None
+    fin = load_finishes(d / finishes, sc, chk) if (d / finishes).exists() else None
     chk.raise_if_any()
-    return Project(d, sc, ins, inv, sup, bs)
+    return Project(d, sc, ins, inv, sup, bs, fin)
+
+
+def load_scene_only(project_dir, scene="scene.json", root=None, finishes=FINISHES_FILE) -> Project:
+    """A scene by itself, with its finishes when the file exists: what a
+    picture outside a manual needs (still.py) and what the CAD stage meshes
+    when a directory holds no inventory. The result has no inventory, no
+    instructions, no supplement and no build scope, whatever else the
+    directory holds.
+    """
+    d = Path(project_dir).resolve()
+    chk = _Check()
+    sc = load_scene(d / scene, root or d, chk)
+    chk.raise_if_any()
+    fin = load_finishes(d / finishes, sc, chk) if (d / finishes).exists() else None
+    chk.raise_if_any()
+    return Project(d, sc, None, None, None, None, fin)
 
 
 def inventory_template(scene: Scene):

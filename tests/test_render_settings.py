@@ -88,3 +88,17 @@ def test_exploded_view_settings_are_validated(tmp_path):
         settings({"groups": [{"id": "G", "offset_mm": [1, 2]}]})
     with pytest.raises(SettingsError, match="listed twice"):
         settings({"groups": [{"id": "G", "offset_mm": [1, 2, 3]}, {"id": "G", "offset_mm": [0, 0, 0]}]})
+
+
+def test_a_still_has_an_exposure_of_its_own(tmp_path):
+    s, _ = load_settings(tmp_path)
+    assert s["exposure"] == 0.0 and s["still_exposure"] == -2.5        # a manual's views are high-key; a still shows colours
+    assert "still" in s["floor"]["views"]
+    (tmp_path / "render.json").write_text(json.dumps({"still_exposure": -1, "exposure": 0.5}))
+    s, _ = load_settings(tmp_path)
+    assert s["still_exposure"] == -1 and s["exposure"] == 0.5
+    for key in ("still_exposure", "exposure"):
+        for bad in ("-2", None, True, [1]):
+            (tmp_path / "render.json").write_text(json.dumps({key: bad}))
+            with pytest.raises(SettingsError, match=f"{key} must be a number of stops"):
+                load_settings(tmp_path)

@@ -96,8 +96,10 @@ the current settings (`reuse.py`: a joint close-up whose occurrences, context,
 context style or explicit direction changed, and any view drawn without
 outlines that the current `lines.max_triangles` would now outline; a lower
 budget never discards an outlined image, so the 32-minute overview survives;
-the receipt lists the stale ones in `stale_reused_views`; other appearance
-changes such as looks, group directions or `--no-lines` still need `--views`); the enclosure's project-side `render.json` caps line art at
+the receipt lists the stale ones in `stale_reused_views`; since 2026-11-19 a
+view that shows a part whose look or finish changed is stale too, the receipt
+recording what every part was drawn with; other appearance
+changes such as group directions or `--no-lines` still need `--views`); the enclosure's project-side `render.json` caps line art at
 400 000 visible triangles, so no full-assembly view runs Freestyle. Measured on
 2026-10-22 on the enclosure (Cycles, denoiser, 64 adaptive samples): seven wide
 1200 × 600 thumbnails of long extrusions 21 to 22 s each with the floor, their
@@ -129,6 +131,19 @@ and 18 step images (15 to 38 s each with outlines for the six frame steps up
 to 600 000 visible triangles, 6 to 10 s each without above it) in 308 s and
 reused the 67 other views; a changed `step_context_alpha` is an appearance
 change and needs the step views named with `--views`.
+
+A picture outside a manual (`still.py`, 2026-11-19) runs on either route:
+`blender -b --python mechanical_docs/still.py -- SCENE_DIR MESHES_JSON OUT_DIR
+--views iso,+z --engine BLENDER_EEVEE_NEXT` in the Guix render role, or
+`pixi run -e render still SCENE_DIR MESHES_JSON OUT_DIR --views iso,+z` for
+Cycles. On the two-bases fixture (six occurrences) a 720 × 540 still took 12 s
+with Cycles, the denoiser and the floor, 3 s seen from below, where the floor
+is dropped, and under a second with EEVEE. The studio lights a face that
+looks up about seven times as brightly as its colour, with both engines: at
+exposure 0 a `#808080` finish is white on top, and at the stills' default of
+-2.5 stops it reads back as 140 with Cycles and 139 with EEVEE. EEVEE draws a
+translucent finish by blending and shows some blotches in the shadow near
+it; Cycles is the reference for such a part too.
 
 ## Typst and Poppler
 

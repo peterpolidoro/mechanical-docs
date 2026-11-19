@@ -183,6 +183,66 @@ renderer derives the deferred steps from it and `reuse.py` re-renders any
 step whose additions or installed-before set changed. The manual stage
 refuses a receipt whose step images were rendered under a different scope.
 
+## Finishes (`finishes.json`, optional)
+
+What a picture draws each part with (2026-11-19). A project keeps its
+finishes in one hand-edited file of its own (`finishes.toml` in the layout of
+`mechanical-cad`), which this pipeline never reads. The flatten step there
+writes `finishes.json` **beside** `scene.json`, not into it, so that a
+changed colour does not change the scene's hash and call for new meshes.
+`schema_version` is the integer `1`. Top level: `schema_version`, `scene`
+(the relative path of the loaded scene), `source` (optional object of scalar
+provenance values), `finishes` and `parts`:
+
+```json
+{
+  "schema_version": 1,
+  "scene": "scene.json",
+  "source": {"kind": "mechanical-cad-finishes", "file": "finishes.toml", "sha256": "…"},
+  "finishes": {
+    "black-anodized": {"color": "#18181a", "metallic": 0.6, "roughness": 0.42, "opacity": 1.0}
+  },
+  "parts": {"<scene part id>": "black-anodized", "<another part id>": null}
+}
+```
+
+| Field | Rule |
+| --- | --- |
+| `finishes` | an object of named finishes (may be empty); a name is lower-case letters and digits in groups joined by single hyphens |
+| a finish | exactly four fields, all explicit: `color`, an sRGB colour as a colour picker gives it, `#rrggbb`; `metallic` and `roughness`, numbers from 0 to 1; `opacity`, a number above 0 and at most 1 |
+| `parts` | exactly the scene's part ids as keys; each value is the name of a finish defined in the file, or `null` when nobody has said |
+
+Unknown fields, a wrong schema version, a `scene` that is not the loaded
+scene, a finish with a field missing, a part of the scene without an entry,
+an id that is not a part of the scene and a name the file does not define are
+rejected; all problems are reported together. A finish that no part uses is
+accepted. A finish belongs to a part: every occurrence of the part is drawn
+alike, and a part of several bodies has one finish.
+
+**What it changes.** Pictures only: no mesh, quantity, identity or order.
+A part is drawn in the look `render.json` names for it under `looks` when it
+names one; else in its finish; else in `default_look` (`looks.py`). The
+project's illustration settings hold over the finishes because they are the
+explicit choice for these documents; a project that wants its finishes drawn
+leaves the part out of `looks`. A finish becomes a material with the colour
+converted from sRGB to linear, its `metallic` and `roughness`, and its
+`opacity` as the surface's alpha, so what lies behind a part of opacity
+0.35 shows through it. The outlines are those of opaque parts: an edge
+behind a translucent part is not drawn.
+
+**What it does not change by itself.** The studio of the render stage is
+high-key, which suits outlined pictures in a manual: a face that looks up is
+lit about seven times as brightly as its colour (measured on 2026-11-19 with
+both engines), so every finish lighter than a dark grey comes out white on
+top in a manual's views, as the palette's own light entries do. A picture
+outside a manual is exposed for its colours instead (`still_exposure`, below).
+
+The file is a render input and not a geometry input: the CAD stage's receipt
+stays good when it changes, the render stage records its hash, `--reuse`
+judges every view by the looks of the parts it shows (below), and the manual
+stage refuses a render receipt made with other finishes, with finishes the
+project no longer has, or without finishes the project now has.
+
 ## Receipts and checks
 
 `geometry-validation.json` is a fixture-generator receipt. It records exported
@@ -190,7 +250,8 @@ STEP hashes/validity/bounds/volume and the known final placements/clearance chec
 It is not a general schema validator, render result, site build or assembly-path
 qualification. No generated fixture result establishes production acceptance.
 
-Every stage records the hashes of the scene, instructions, inventory and the
+Every stage records the hashes of the scene, instructions, inventory,
+finishes and the
 relevant render and publish settings, the asset hashes and the software
 versions in its receipt (see "Stage outputs"). The loader rejects missing
 files, unknown or duplicate ids, hierarchy cycles, bad transforms, wrong
@@ -211,6 +272,7 @@ everything else with one combined error listing every problem. Accepted:
 | inventory | `schema_version`, `scene`, `status`, `notes[]` (optional project sentences for the status block), `items[]` (`part_id`, `required`, `unit`; optional stock record `on_hand_each`, `counted_by`, `counted_date`, `stock_location`, `intended_configuration_confirmed`; deprecated `counted`, null only) |
 | supplement | `schema_version` (integer 1), `scene`, `status`, `source`, `items[]` with the 23 fields listed under *Supplement* |
 | build scope | `schema_version` (integer 1), `scene`, `phase`, `title`, `decided_by`, `review_state`, `deferred_occurrence_ids[]`, `conditional_groups[]` (`id`, `rule`, `decided`), `backlight`, `deferred_design[]`, `note`; every field explicit, see *Build scope* |
+| finishes | `schema_version` (integer 1), `scene`, `source`, `finishes{name: {color, metallic, roughness, opacity}}`, `parts{part id: name or null}`; see *Finishes* |
 
 ### Production fields (accepted since 2026-10-21, after the first Windows per-part export)
 
@@ -302,7 +364,9 @@ enclosure snapshot (inch, mm and cm assets, +Y-up native frame) exercise this.
 ### Illustration settings (`render.json`, optional)
 
 Per project, beside the manifests. Only appearance and which illustrative
-views exist: `looks` (part id → palette name), `palette` additions, `engine`,
+views exist: `looks` (part id → palette name; it holds over the part's finish
+in `finishes.json`, and a part with neither is drawn in `default_look`),
+`palette` additions, `engine`,
 `samples`, image sizes, `aspect`, `fill`, outline and arrow styling, the
 line-art budget (`lines.max_triangles`, above which a view is drawn without
 Freestyle and the receipt says so), the long-part thumbnail rules
@@ -345,6 +409,14 @@ occurrence ids, the context ids, the context occurrences and the hidden ones. `j
 framing margin. These are inspection views, not steps: nothing moves and no
 fastener is drawn.
 
+`still_exposure` (added 2026-11-19, default -2.5) is the exposure, in stops,
+of a picture outside a manual (`still.py`), where every other view uses
+`exposure` (default 0). At 0 the studio turns a mid-grey finish white on a
+face that looks up; at -2.5 such a face comes out about as its finish gives
+it (a `#808080` finish read back as 140, 139, 139 with Cycles and 139, 139,
+139 with EEVEE). `floor.views` now names `still` among the views that get the
+shadow-catcher floor.
+
 `exploded_view` (added 2026-10-23 for the front page) is an object: `enabled`
 (true, false or `"auto"`, the default, which draws the view when the root has
 two or more groups), `direction` (three numbers or null for
@@ -367,7 +439,8 @@ like after every other. An unknown group id is refused.
 | --- | --- | --- |
 | `inspect.json` | `python3 -m mechanical_docs inspect` | validated parts, occurrences with world transforms, steps with cumulative state (deferred steps flagged), inventory reconciliation with stock records, the supplement's rows and summary (by scope, kind, status; unknown quantities; unplaced rows), the build scope's summary and per-part phase quantities, input hashes |
 | `meshes/<part>.glb`, `meshes/meshes.json` | `cad_mesh.py` (FreeCADCmd) | one GLB per part (metres, +Y up, conversion recorded in the asset extras), declared STEP unit versus manifest unit, STEP validity/bounds/volume, mesh winding and volume checks, tessellation attempts under the per-part triangle budget, hashes |
-| `renders/*.png`, `renders/hotspots/*.json`, `renders/render-receipt.json` | `render.py` (Blender) | thumbnails (wide ones plus end views for long parts), overview, the exploded subassembly view (`exploded.png` with the offsets used per group and the group membership in its hotspots), subassembly inspection views (`group-*.png` with occurrence ids, parent and path), joint close-ups (`joint-*.png` with joint id, occurrence ids, context assembly and context occurrences), step and result images; projected occurrence boxes; versions, engine, denoiser, settings hash, per-view hashes, visible triangles and whether line art was drawn, which views were copied from an earlier receipt (`--reuse`: same scene, assets, meshes and engine; the inventory, supplement and build scope may differ, and so may the instructions, which then stale the overview and every step view; a copy is also refused when a joint or exploded specification changed, a step's additions or installed-before set changed, or outlines became affordable; `reused_from` per view, `stale_reused_views` per receipt), the build scope's file hash and deferred steps, mesh-bounds and pose-restoration checks |
+| `renders/*.png`, `renders/hotspots/*.json`, `renders/render-receipt.json` | `render.py` (Blender) | the look every part was drawn with (`part_looks`: its name, whether it came from `render.json`, `finishes.json` or the default, and its numbers), thumbnails (wide ones plus end views for long parts), overview, the exploded subassembly view (`exploded.png` with the offsets used per group and the group membership in its hotspots), subassembly inspection views (`group-*.png` with occurrence ids, parent and path), joint close-ups (`joint-*.png` with joint id, occurrence ids, context assembly and context occurrences), step and result images; projected occurrence boxes; versions, engine, denoiser, settings hash, per-view hashes, visible triangles and whether line art was drawn, which views were copied from an earlier receipt (`--reuse`: same scene, assets, meshes and engine; the inventory, supplement and build scope may differ, and so may the instructions, which then stale the overview and every step view; a copy is also refused when a joint or exploded specification changed, a step's additions or installed-before set changed, outlines became affordable, or a part the view shows in its own look has another look now (a thumbnail shows its part; the overview, the exploded view and a subassembly view every visible occurrence's part; a joint close-up its subject occurrences; a step what it adds), which catches a changed finish and, since 2026-11-19, a changed `looks` entry or palette entry in `render.json`; a receipt from before that date records no looks, and its views are taken as they always were except those that show a part whose look now comes from `finishes.json`; `reused_from` per view, `stale_reused_views` per receipt), the build scope's file hash and deferred steps, mesh-bounds and pose-restoration checks |
+| `still-<view>.png`, `stills.json` | `still.py` (Blender) | pictures outside a manual, of a directory that needs a scene, its assets and the mesh receipt and nothing else (no inventory, no instructions; `cad_mesh.py` meshes such a directory too): the whole scene, or one subassembly with `--group` (`still-<group>-<view>.png`), every occurrence at its canonical pose and in its look, orthographic, from a named side (`iso`, `iso-back`, `below`, `below-back`, `+x`, `-x`, `+y`, `-y`, `+z`, `-z`: the names and cameras of `mechanical-cad`'s `tools/picture.py`, in the scene's +Z-up frame; straight along Z the picture is a plan with X to the right and Y upwards from above) or from `--direction X,Y,Z` (`still-custom.png`); exposed by `still_exposure` or `--exposure`; the receipt of the run records versions, engine, exposure, the settings' hash, the hashes of the scene, the assets, the finishes and the meshes, `part_looks`, each picture with its hash, camera, where the camera stands, what it shows and whether it has outlines and the floor, and the mesh-bounds and pose-restoration checks; pictures of an earlier run in the same directory are not in it |
 | `renders/viewer/assembled.glb`, `exploded.glb`, `viewer-receipt.json` | `viewer.py` (bpy) | one GLB per state: metres, +Y up, one mesh per part shared by every occurrence through nodes, node names = occurrence ids, one parent node per subassembly instance named by its id (nested as in the scene; the top-level groups carry the exploded offsets in `exploded.glb`), the root's own parts under `root-parts`, one flat material, no textures or Draco; meshes over their share of the triangle budget (default 200 000 per file, small parts kept whole) collapse-decimated with normals split at sharp edges; the receipt records the budget, per-part triangles before and after, instanced totals, hashes, the offsets (from the render receipt, which must match the project) and one anchor per subassembly instance and for the root parts in both states (bounds centre projected onto the nearest surface, with its outward normal) |
 | `manual/manual.json`, `index.html`, `manual.typ`, `<id>.pdf`, `build-receipt.json`, `viewer/` | `python3 -m mechanical_docs manual [--appendix]` | the single document model and both outputs generated from it: the finished assembly first, then the subassemblies drawn apart with numbered callouts (the subassembly page numbers, one per definition on the instance that shows best, the root's own parts as the next number) and a key with page references (Typst labels) or links (HTML), picture-led parts cards (CAD quantity labelled as such, stock record when recorded, a paper count box with its label beside it), the supplementary items section (existing-design rows), one page per subassembly inspection view (its definition, grouped by the exporter's `document` or else by the id stem, with the instance count, the shown and the other instance ids, per-subassembly counts and a total for all instances only when they are identical in content: same parts and quantities, none flexible or position-overridden; `groups[].definition`, `instance_ids`, `instance_count`, `instances_identical` in manual.json; a document/id-stem disagreement is a finding) and per joint close-up with their "hardware to review" lists, steps, a compact build record; when `renders/viewer/` exists, `viewer/assembled.glb`, `viewer/exploded.glb` (hash-checked copies) and `viewer/hotspots.json` (schema 1, agreed with the Linux CAD agent 2026-10-23: `states` with GLB paths, drawn triangles and offsets, `triangle_budget`, `subassemblies[]` with the manual's number, definition, instance ids, shown instance, `instances_identical`, anchors per state and the shown instance's union box in `overview.png` and `exploded.png`, `root_parts` likewise) beside `manual.json`, whose `exploded_view` (image, offsets, callouts with boxes) and `viewer` (files, hashes, budget) sections point at them; `--appendix` adds the technical appendix (full part ids, Vault ids, occurrence lists, every hash, every supplement row and field, stock records), which manual.json always carries |
 | `manual/check-report.json`, `manual/checks/` | `python3 -m mechanical_docs check` | HTML/PDF/manual.json agreement (parts, CAD quantities, subassembly sections with their part counts and instance counts, exploded-view callouts and the PDF key's page numbers against the pages that carry the subassembly headings, joint sections, supplementary rows and the per-group/per-joint hardware lists, step order; supplementary rows separate from CAD parts with unknown quantities kept unknown), link and image resolution, viewer files against their receipt and `hotspots.json` against the manual's numbers, page rasters and greyscale copies |
@@ -376,8 +449,10 @@ Each stage refuses inputs whose hashes differ from the receipt it consumes for
 the inputs that stage depends on: the render stage compares meshes.json with
 the scene and asset hashes; `--reuse` compares the earlier receipt's scene and
 asset hashes and then judges every view on its own (instructions, joint and
-exploded specifications, step states, outline budget); the manual stage
-compares the render receipt with the scene, asset and instruction hashes and
+exploded specifications, step states, outline budget, the looks of the parts
+it shows); the manual stage
+compares the render receipt with the scene, asset, instruction and finish
+hashes and
 the step records with the current build scope (a recorded stock count, a new
 supplement row or a changed scope needs a new manual, never a new render
 unless a step's state changed); and every receipt still records every input hash. Receipts that report failed
