@@ -87,41 +87,91 @@ it, with a warning in the receipt and `lines: false` on the view record.
 `--no-lines` turns Freestyle off for a whole run. Measured after the budgets
 on the same enclosure (2.44 million triangles, 37 parts, 155 occurrences): CAD
 stage 2 min 22 s, thumbnails 9.5 to 23 s each, overview 51 s without lines and
-32 min with them. Grease Pencil Line Art is the candidate replacement if that
-is still too slow for step views.
+32 min with them. Grease Pencil Line Art draws such views in seconds, when a
+project asks for it (below).
 
-Line Art was tried in background mode on 2026-11-19, on the enclosure's scene
-(1200 x 900, the view `iso`, on a machine that was rendering other things at
-the same time, so the times are upper bounds), from a script outside this
-repository; nothing here draws with it yet. A Grease Pencil object with one
-Line Art modifier over the collection of what a view draws (contour and
-crease lines, no intersections) runs without a window in both Blenders:
+Line Art is built in since 2026-11-19, behind a setting that is off by
+default: `lines.outliner` in `render.json`, or `--outliner` of `render.py`,
+`still.py` and `motion.py`, takes `freestyle` (the default: what is described
+above), `line-art` (Line Art for every view, whatever its size) or `mixed`
+(Freestyle within its budget, Line Art above it). `motion.py` draws lines
+only when `--lines` asks for them. One Grease Pencil object carries a Line
+Art modifier for a view's context and one for its subject, each over the
+collection the Freestyle line set of that name selects, with the same
+colours and the same widths in pixels (`lines.subject`, `lines.context`).
+What trying it on the enclosure showed, each point looked at in pictures:
 
-| What is drawn | Blender, engine | Without lines | Freestyle | With Line Art |
-| --- | --- | --- | --- | --- |
-| one tank support frame, 343 000 triangles | Guix 4.5.10, EEVEE | 0.8 s | 44 s | 19 s |
-| the same | bpy 4.5.14, EEVEE | 10 s | | 19 s |
-| the same | bpy 4.5.14, Cycles | 15 s | | 33 s |
-| the whole enclosure, 2.44 million triangles | Guix 4.5.10, EEVEE | 1.5 s | not run; 32 min at 1600 px on 2026-10-22 | 44 s |
-| the same | bpy 4.5.14, Cycles | 8 s | | 48 s |
+- **The broken edges of the thin-walled tank were three things, and none of
+  them the wall.** The lines were drawn without anti-aliasing, so the two
+  edges of the rim, closer together than a line is wide, ran into each other
+  in steps: the final render now samples the strokes sixteen times
+  (`aa_samples` of the scene's Grease Pencil settings). The CAD stage writes
+  every face of a
+  part as a patch of its own, and Line Art takes an edge with one face for an
+  outline, so it drew every boundary between two faces, the tangent line of
+  a fillet and the seam of a cylinder among them, each twice: the meshes are
+  now joined at import when Line Art may draw (`Renderer.weld`, a second for
+  the enclosure's 37 meshes, 394 130 vertices to 237 111), with every
+  corner's normal carried through, since Blender keeps a custom normal
+  relative to the faces around its vertex and joining alone turned them (the
+  overview without lines differed in 17 080 pixels of 1.9 million with the
+  normals left to themselves and in 9 with them carried). And an edge the
+  mesh marks as sharp is not drawn for that alone (`use_crease_on_sharp`
+  off): with it every chamfer of a bought part has a line, which Freestyle
+  does not draw.
+- **Two widths and colours**: the subject's modifier and the context's give
+  a step its thick dark and its thin grey lines as Freestyle does; the
+  second modifier takes the first one's reading of the scene (`use_cache`).
+- **A width holds in a perspective picture**: a stroke's radius is a length
+  in the scene, and nodes after the modifiers multiply every point's radius
+  by its distance in front of the camera. On the fixture with a 20 mm lens
+  the lines are one width near and far with the nodes; without them every
+  line is several times too wide, and wider near than far.
+- **`--reuse`**: a view's record names what drew its outlines (`outliner`),
+  and a view outlined by the outliner the current settings would not use for
+  it is rendered again, as is a view without outlines that would now have
+  them (reuse.py). Under `mixed` a picture Freestyle outlined is kept
+  whatever its size.
 
-The times are those of the render call. The modifier is worked out again at
-every update of the scene, and a view's framing makes several: with the
-object in the scene from the start, the same views took 85 to 131 s. Whoever
-builds this in adds the object for the render call alone. What the pictures
-showed: the lines have to be drawn in front (`show_in_front`), since they are
-already the visible ones and are otherwise cut up by the surfaces they lie
-on; their width is a length in the scene, so it has to follow the picture's
-scale (two pixels on the whole enclosure were a radius of 3 mm); drawn so,
-the whole enclosure reads as a Freestyle picture does, edges, handles and
-casters outlined and the framing's many edges run together into dark bands.
-On the thin-walled tank some edges still came out broken, where two edges
-lie a wall's thickness apart; and like Freestyle it draws no edge behind a
-translucent part. Open before it is built in: two widths and colours for
-what a step adds and what was there before, as the two Freestyle line sets
-have; a perspective view, where one width in the scene is not one width in
-the picture; and what `--reuse` makes of a view that had no lines and would
-now have them.
+Three more things the pictures and the clock showed. Line Art reads every
+mesh of the scene, the ones a view hides from the render too: they hide no
+line (the pictures are the same to the pixel) and cost their triangles, eight
+seconds for a thumbnail of the tank's 604 triangles; each hidden object is
+taken out by its own switch (`lineart.usage`) for the call. The strokes are
+lit by the studio unless told otherwise, which turned the dark line a pale
+blue-grey. And a line comes out as wide as the modifier's `radius`, not
+twice that (measured in the Guix Blender; the other one's pictures agree).
+The object exists for the render call alone:
+the modifier is worked out again at every update of the scene, and framing a
+view makes several.
+
+Measured on 2026-11-19 on the enclosure's staged project through
+`render.py`, at the manual's full quality (64 samples), 1600 x 1200 and the
+thumbnail 600 x 600, on a machine whose sixteen cores were busy with other
+work throughout (a load of 30 to 50), so every time is an upper bound:
+
+| View | Visible triangles | EEVEE, Guix 4.5.10: without outlines | with Line Art | Cycles, bpy 4.5.14: without outlines | with Line Art |
+| --- | --- | --- | --- | --- | --- |
+| the tank alone (thumbnail) | 604 | 0.8 s | 0.9 s | 27.5 s | 23.6 s |
+| step 4, twelve parts added | 406 724 | 2.0 s | 4.9 s | 18.8 s | 22.6 s |
+| step 8 in perspective, twenty parts added | 1 180 312 | 4.7 s | 12.7 s | 17.2 s | 27.7 s |
+| the overview | 2 436 488 | 1.6 s | 13.7 s | 108.5 s | 109.4 s |
+
+Against Freestyle, with EEVEE at the same size: one tank support frame
+(343 000 triangles) 1.2 to 2.3 s with Line Art and 17 to 45 s with
+Freestyle; the camera frame (472 000) 4 to 6 s and 29 to 31 s; step 5
+(523 000) 9 s and 27 s. Freestyle was not run on the overview again (32
+minutes on 2026-10-22). Within Freestyle's budget the two draw the same
+picture but for details: Freestyle draws an edge inside a part a little
+thinner than its silhouette, Line Art draws all at one width. On the whole
+enclosure the framing's many edges run together into dark bands with either.
+Like Freestyle, Line Art draws no edge behind a translucent part. Back faces
+are left out of Line Art's reading (`use_back_face_culling`): with them the
+overview took half as long again and differed in 31 pixels. With the default
+outliner nothing is joined and no picture changes: the two-bases fixture
+rendered by the committed code and by this one gave ten of eleven pictures
+the same to the pixel, and the eleventh, the exploded view, differed in 27
+pixels, as two runs of the committed code differ from each other (35).
 
 Two mechanisms keep a production rebuild short. `render.py --reuse DIR` copies
 every planned view that an earlier complete receipt holds for the same scene,
@@ -208,6 +258,21 @@ and 275 s, 0.3 MB. The same sequence with the shadow-catcher floor took 7 to
 17 s a frame and 929 s. With EEVEE in the Guix Blender the whole enclosure
 took 0.7 s a frame, 24 frames in 22 s. Outlines (`--lines`) were tried on a
 fixture only: Freestyle took 44 s on one frame of the tank support frame.
+
+Joints were drawn on a real assembly for the first time on 2026-11-19, later:
+`mechanical-cad`'s mechanical example, 37 parts and 108 occurrences, 344 000
+triangles in its meshes and 1.21 million drawn, with EEVEE in the Guix
+Blender at 1280 x 720, on a machine busy with other work (a load of 30 on 16
+cores), so the times are upper bounds. A still of the whole at a pose took
+20.8 s with Freestyle's outlines and 4.6 s with Line Art's. One unit alone
+(50 occurrences, 575 000 triangles), its lever through its range with the
+two gears turning against each other, with Line Art's outlines: 95 frames,
+1.8 to 3.8 s a frame and 238 s in all, a file of 0.2 MB. The whole assembly
+seen from above, one unit turning through its arc slot, with Line Art's
+outlines: 95 frames, 3.0 to 5.5 s a frame and 346 s, 0.4 MB. Line Art is what
+makes outlines affordable in a video: at Freestyle's 20 s a frame the second
+would have taken half an hour. The example's scene is declared Z up and
+stands Y up, so every one of these pictures names its up (`--up`).
 
 ## Typst and Poppler
 

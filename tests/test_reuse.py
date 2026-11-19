@@ -38,6 +38,42 @@ def test_newly_affordable_outlines_make_a_copy_stale_but_a_lower_cap_does_not():
     assert stale_reason({"id": "part-x", "kind": "part-thumbnail"}, {}, True, 600000) is None      # no record of lines: reusable
 
 
+def test_a_view_says_what_drew_its_outlines_and_one_drawn_the_other_way_is_stale():
+    budget = 600000
+    small = {"id": "group-g", "kind": "group", "visible_triangles": 500000}
+    large = {"id": "overview", "kind": "overview", "visible_triangles": 2436488}
+    freestyle = {"lines": True, "outliner": "freestyle"}
+    line_art = {"lines": True, "outliner": "line-art"}
+    before_the_choice = {"lines": True}                    # a record from before there were two outliners: Freestyle's
+    none = {"lines": False, "outliner": None}
+
+    def why(view, state, outliner, enabled=True):
+        return stale_reason({**view, **state}, {}, enabled, budget, outliner=outliner)
+
+    # Line Art for every view: what had no outlines gets them, whatever its size, and Freestyle's lines are the other kind
+    assert why(large, none, "line-art") == "Line Art now draws this view's outlines and the earlier view has none"
+    assert why(small, none, "line-art") == "Line Art now draws this view's outlines and the earlier view has none"
+    for state in (freestyle, before_the_choice):
+        assert why(small, state, "line-art") == "the earlier view's outlines are Freestyle's and Line Art draws them now"
+        assert why(large, state, "line-art") == "the earlier view's outlines are Freestyle's and Line Art draws them now"
+    assert why(small, line_art, "line-art") is None and why(large, line_art, "line-art") is None
+    # back to Freestyle: Line Art's lines go, within the budget for Freestyle's and above it for none
+    assert why(small, line_art, "freestyle") == "the earlier view's outlines are Line Art's and Freestyle draws them now"
+    assert why(large, line_art, "freestyle") == "the earlier view's outlines are Line Art's, which this run does not use"
+    assert why(small, freestyle, "freestyle") is None and why(large, freestyle, "freestyle") is None
+    assert why(large, none, "freestyle") is None
+    # mixed: Freestyle within the budget, Line Art above it; a picture Freestyle outlined is kept wherever there is one
+    assert why(small, none, "mixed").startswith("line art is now within the budget")
+    assert why(large, none, "mixed") == "Line Art now draws this view's outlines and the earlier view has none"
+    assert why(small, freestyle, "mixed") is None and why(large, freestyle, "mixed") is None and why(large, before_the_choice, "mixed") is None
+    assert why(large, line_art, "mixed") is None
+    assert why(small, line_art, "mixed") == "the earlier view's outlines are Line Art's and Freestyle draws them now"
+    # a run without lines says nothing of outlines, as before, and neither does a record that does not hold them
+    for outliner in ("freestyle", "line-art", "mixed"):
+        assert why(small, line_art, outliner, enabled=False) is None and why(large, none, outliner, enabled=False) is None
+        assert stale_reason({"id": "part-x", "kind": "part-thumbnail"}, {}, True, budget, outliner=outliner) is None
+
+
 def test_exploded_view_staleness():
     old = {"id": "exploded", "kind": "exploded", "offsets_mm": {"A": [0, 0, 100.0], "root-parts": [0, 0, -100.0]}, "direction": [0.5698, -0.6838, 0.4558],
            "direction_from_settings": False, "lines": True, "visible_triangles": 10}

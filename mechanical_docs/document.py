@@ -588,9 +588,9 @@ def build_model(project, render_receipt, meshes_receipt=None, appendix=False, ho
                                                            "all_checks_passed": meshes_receipt.get("all_checks_passed"),
                                                            "sha256": render_receipt.get("meshes_json_sha256")},
             "render": {k: render_receipt.get(k) for k in ("generated_at_utc", "blender", "engine", "denoiser", "preview", "samples", "long_side_px", "settings_sha256",
-                                                          "lines", "lines_max_triangles", "all_checks_passed", "warnings", "reused_from", "reused_views", "inspection_groups", "joint_views")},
+                                                          "lines", "outliner", "lines_max_triangles", "all_checks_passed", "warnings", "reused_from", "reused_views", "inspection_groups", "joint_views")},
             "render_views": {v["id"]: v["sha256"] for v in render_receipt["views"]},
-            "render_view_details": {v["id"]: {k: v.get(k) for k in ("kind", "width", "height", "seconds", "lines", "visible_triangles", "reused_from", "reused_generated_at_utc", "style")}
+            "render_view_details": {v["id"]: {k: v.get(k) for k in ("kind", "width", "height", "seconds", "lines", "outliner", "visible_triangles", "reused_from", "reused_generated_at_utc", "style")}
                                     for v in render_receipt["views"]},
             "generator": {**receipts.python_info(), "package": "mechanical-docs"},
         },

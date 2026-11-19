@@ -7,6 +7,7 @@ Checks that the kernel honours each file's declared unit (inch 25.4x, centimetre
 the 0.001 factor whatever the file says, and that an asset declared in the wrong
 unit in the manifest is refused with a message naming both units.
 """
+import hashlib
 import json
 import shutil
 import subprocess
@@ -101,3 +102,65 @@ def test_the_stage_s_own_options_go_after_a_bare_double_dash(tmp_path):
     r = subprocess.run([FREECAD, str(ROOT / "mechanical_docs" / "cad_mesh.py"), "--pass", str(FIX), str(tmp_path / "none"), "--max-triangles", "400"],
                        capture_output=True, text=True, timeout=600)
     assert not (tmp_path / "none" / "meshes.json").exists() and "[cad_mesh]" not in r.stdout + r.stderr
+    # a bare `--` is no argument of the stage: with the output directory left out it says how it is called
+    r = subprocess.run([FREECAD, str(ROOT / "mechanical_docs" / "cad_mesh.py"), "--pass", str(FIX), "--"], capture_output=True, text=True, timeout=600)
+    log = r.stdout + r.stderr
+    assert "IndexError" not in log and "--pass PROJECT_DIR OUT_DIR" in log and "exit status 1" in log
+
+
+def with_a_surface_model(tmp_path):
+    """The units fixture with its millimetre pin made a model of surfaces: the same faces in a shell that is no
+    solid, as a supplier's file sometimes is."""
+    proj = tmp_path / "project"
+    shutil.copytree(FIX, proj)
+    step = proj / "assets" / "pin-mm.step"
+    data = step.read_bytes()
+    assert data.count(b"MANIFOLD_SOLID_BREP('',#16)") == 1 and data.count(b"ADVANCED_BREP_SHAPE_REPRESENTATION") == 1
+    data = (data.replace(b"MANIFOLD_SOLID_BREP('',#16)", b"SHELL_BASED_SURFACE_MODEL('',(#16))")
+                .replace(b"ADVANCED_BREP_SHAPE_REPRESENTATION", b"MANIFOLD_SURFACE_SHAPE_REPRESENTATION"))
+    step.write_bytes(data)
+    scene = json.loads((proj / "scene.json").read_text())
+    next(p for p in scene["parts"] if p["id"] == "pin-mm")["asset"]["sha256"] = hashlib.sha256(data).hexdigest()
+    (proj / "scene.json").write_text(json.dumps(scene))
+    return proj
+
+
+def test_a_part_without_a_solid_is_a_problem_unless_it_is_named_a_surface_model(tmp_path):
+    proj = with_a_surface_model(tmp_path)
+    rec, log = run_stage(proj, tmp_path / "strict")
+    assert rec["all_checks_passed"] is False and "exit status 1" in log
+    assert rec["parts"]["pin-mm"]["checks"]["problems"] == ["no solid in STEP"]
+    assert "surface_parts" not in rec and "surface_model" not in rec["parts"]["pin-mm"]["step"]
+
+    solid, _ = run_stage(FIX, tmp_path / "solid")
+    rec, log = run_stage(proj, tmp_path / "named", "--", "--surface-parts", "pin-mm")
+    assert rec["all_checks_passed"] and "exit status 0" in log, [p["checks"]["problems"] for p in rec["parts"].values()]
+    pin = rec["parts"]["pin-mm"]
+    assert pin["step"]["surface_model"] is True and pin["step"]["solids"] == 0 and pin["step"]["faces"] == 3
+    assert pin["checks"]["volume_deviation"] is None and pin["checks"]["volume"].startswith("not checked: a surface model")
+    assert "declared_volume_deviation" not in pin["checks"]
+    # the same faces give the same mesh as the solid's, turned the same way: the shell is closed
+    was = solid["parts"]["pin-mm"]["mesh"]
+    assert (pin["mesh"]["triangles"], pin["mesh"]["bounds_min"], pin["mesh"]["bounds_max"], pin["mesh"]["winding_flipped"]) == \
+           (was["triangles"], was["bounds_min"], was["bounds_max"], was["winding_flipped"])
+    assert rec["surface_parts"] == ["pin-mm"]
+    assert "the volume of the parts named as surface models: pin-mm" in rec["not_checked"]
+    assert "a surface model, volume not checked, OK" in log
+    assert "all checks passed: True; meshed from their faces as surface models, volume not checked: pin-mm" in log
+    # the parts that are not named are held to everything, as before
+    assert "surface_model" not in rec["parts"]["base-cm"]["step"] and rec["parts"]["base-cm"]["checks"]["volume_deviation"] < 0.02
+
+
+def test_the_option_says_what_a_part_is_and_silences_nothing(tmp_path):
+    """A part that has a solid and is named a surface model is a problem of its own, and a name that is no part
+    of the scene stops the stage."""
+    rec, log = run_stage(FIX, tmp_path / "meshes", "--", "--surface-parts", "pin-mm,base-cm")
+    assert rec["all_checks_passed"] is False and "exit status 1" in log
+    for pid in ("pin-mm", "base-cm"):
+        assert rec["parts"][pid]["checks"]["problems"] == ["named a surface model, and its STEP holds 1 solid(s); take it out of --surface-parts"]
+    assert rec["parts"]["pin-in"]["checks"]["passed"]
+    r = subprocess.run([FREECAD, str(ROOT / "mechanical_docs" / "cad_mesh.py"), "--pass", str(FIX), str(tmp_path / "none"),
+                        "--", "--surface-parts", "washer"], capture_output=True, text=True, timeout=600)
+    log = r.stdout + r.stderr
+    assert not (tmp_path / "none" / "meshes.json").exists()
+    assert "--surface-parts: washer is no part of the scene; its parts: " in log and "exit status 1" in log

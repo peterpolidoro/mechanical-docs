@@ -1,4 +1,5 @@
-"""A moving picture outside a manual, run inside Blender: a turntable, an exploded sequence, or the steps of a project.
+"""A moving picture outside a manual, run inside Blender: a turntable, an exploded sequence, the steps of a project,
+a joint taken through its range, or one pose going over into another.
 
     blender -b --python mechanical_docs/motion.py -- PROJECT_DIR MESHES_JSON OUT_DIR turntable [--group ASSEMBLY_ID]
                                                      [--frames 72] [--elevation DEG] [--start DEG]
@@ -6,14 +7,21 @@
                                                      [--view iso | --direction X,Y,Z]
     blender -b --python mechanical_docs/motion.py -- PROJECT_DIR MESHES_JSON OUT_DIR steps [--frames 18] [--hold 8]
                                                      [--view iso | --direction X,Y,Z]
-    each with  [--fps 24] [--size WxH] [--exposure STOPS] [--engine E] [--preview] [--lines] [--webm] [--frames-only]
+    blender -b --python mechanical_docs/motion.py -- PROJECT_DIR MESHES_JSON OUT_DIR joint NAME [--pose POSE] [--frames 36] [--hold 12]
+                                                     [--view iso | --direction X,Y,Z] [--group ASSEMBLY_ID]
+    blender -b --python mechanical_docs/motion.py -- PROJECT_DIR MESHES_JSON OUT_DIR pose FROM TO [--and-back] [--frames 36] [--hold 12]
+                                                     [--view iso | --direction X,Y,Z] [--group ASSEMBLY_ID]
+    the four whose camera stands still also with  [--up +y]
+    each with  [--fps 24] [--size WxH] [--exposure STOPS] [--engine E] [--preview] [--lines] [--outliner freestyle|line-art|mixed]
+               [--webm] [--frames-only]
 
 PROJECT_DIR and MESHES_JSON are what still.py takes: a directory with a
 `scene.json` and its assets, and the CAD stage's receipt for it; `finishes.json`
 and `render.json` are used when they are there, and every part is drawn in its
 look as a still draws it, with a still's exposure (`still_exposure`, or
 `--exposure`). `steps` also needs the project's `instructions.json` with its
-`inventory.json`, and follows the build scope when there is one.
+`inventory.json`, and follows the build scope when there is one. `joint` and
+`pose` need the scene's `motion.json` (joints.py), which nothing else reads.
 
 **turntable.** The whole scene, or one subassembly with `--group`, at its
 canonical poses. The camera goes once round the vertical axis through the
@@ -45,33 +53,72 @@ as the manual's own step image shows it. The camera is the first step's
 instruction view, as the manual's overview has it, unless `--view` or
 `--direction` says otherwise, and frames every pose of the sequence.
 
+**joint.** The joint NAME of `motion.json` goes from its lower limit to its
+upper one in `--frames` frames that start and end slowly, rests there for
+`--hold` frames, comes back the same way and rests again; played again and
+again it closes. What the joint moves turns about its line or slides along it,
+and what joints further in move goes with it. A joint that follows it, as a
+gear follows the gear it meshes with, goes with it at its ratio; such a joint
+cannot be asked for by itself. A joint that the scene holds in several places
+(`NAME@WHERE`) goes in all of them at once when the bare NAME is given. The
+other joints are at zero, where the scene has everything, or where `--pose`
+puts them.
+
+**pose.** Every joint goes from its value in the pose FROM to its value in the
+pose TO, all of them in step, so that each has come the same share of its way
+at every frame, with `--hold` frames at rest before and after; `--and-back`
+brings them back. A joint that a pose does not name is at zero in it.
+
+For both, the camera stands still where `overview_direction` puts it unless
+`--view` or `--direction` says otherwise, and frames everything the sequence
+draws: what stands still, and what moves at every place it comes to. `--group`
+draws one subassembly alone, as a turntable does, where the rest of the scene
+would stand in front of what moves; what the joints move outside it is then
+not drawn.
+
+`--up` names what points up in the picture of a camera that stands still, as
+an axis (`+y`) or as X,Y,Z, where Z is not wanted (views.py). A steps sequence
+that takes its camera from the instructions takes its up from them too, so
+there `--up` goes with `--view` or `--direction`.
+
 Frames are drawn without outlines unless `--lines` asks for them (Freestyle
-costs far more than the picture on real geometry, for every frame) and without
+costs far more than the picture on real geometry, for every frame; what draws
+them is render.json's `lines.outliner`, or `--outliner`, as in the render
+stage, and Line Art draws a whole assembly in seconds) and without
 the shadow-catcher floor, which costs Cycles a second pass for every frame (add
-`turntable`, `exploded-sequence` or `steps-sequence` to `floor.views` in
-render.json for it; the manual's own exploded view is the kind `exploded`).
+`turntable`, `exploded-sequence`, `steps-sequence`, `joint-sequence` or
+`pose-sequence` to `floor.views` in render.json for it; the manual's own
+exploded view is the kind `exploded`).
 OUT_DIR gets
 
     <name>-frames/frame-0001.png ...     the frames, on a transparent background as the render stage draws them
     <name>.mp4                           the frames over white, H.264 (`--webm`: <name>.webm, VP9)
     <name>.json                          the receipt of this run
 
-where <name> is `turntable`, `turntable-<group>`, `exploded` or `steps`. The
+where <name> is `turntable`, `turntable-<group>`, `exploded`, `steps`,
+`joint-<joint>` or `pose-<from>-to-<to>`, the last two with `-<group>` after
+them for a subassembly alone. A video of an earlier run under the
+same name that this run does not write again is taken away. The
 video is written by Blender's own FFmpeg, which both the Guix Blender and the
 `bpy` wheel have, from the frames as they lie on disk; `--frames-only` stops
 before it. The receipt records versions, engine, exposure, the settings' hash,
 the hashes of the scene, the assets, the finishes and the meshes, the look
 every part was drawn with, what is shown, the camera, each frame with its
 hash and what places it (the angle turned, how far apart, the step and how far
-its additions have come), the offsets the parts moved by and where each came
-from, the video with its hash and what Blender reads back of it (frames, size,
-rate), and the checks: mesh bounds against the CAD stage's, canonical poses
-restored after every frame, the video's frame count and size.
+its additions have come, the value of every joint), the offsets the parts moved
+by and where each came from, for a joint or a pose `motion.json` with its hash
+and the joints as it has them, the video with its hash and what Blender reads
+back of it (frames, size, rate), and the checks: mesh bounds against the CAD
+stage's, canonical poses restored after every frame, a turntable's lights where
+they were in the camera's picture at every frame, the video's frame count and
+size.
 
 A moving picture is an illustration. An exploded sequence moves groups by
 offsets chosen to show them and implies no order; a steps sequence shows the
 order the instructions state and nothing else: where a part comes from in it is
-no insertion path, and no fastener, tool or access is implied.
+no insertion path, and no fastener, tool or access is implied. A joint or a
+pose shows where the record of the joints says the parts can go; nothing is
+checked on the way, and parts may pass through each other.
 """
 from __future__ import annotations
 
@@ -83,26 +130,29 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
-from mechanical_docs import explode, receipts, timeline, views  # noqa: E402
+from mechanical_docs import explode, joints, receipts, timeline, views  # noqa: E402
 from mechanical_docs import transforms as T  # noqa: E402
 from mechanical_docs.manifest import ManifestError, load_project, load_scene_only  # noqa: E402
 from mechanical_docs.names import slug  # noqa: E402
 from mechanical_docs.render import Renderer, aabb_of, log, read_meshes  # noqa: E402  (imports bpy: only inside Blender)
-from mechanical_docs.render_settings import load_settings  # noqa: E402
+from mechanical_docs.render_settings import OUTLINERS, load_settings  # noqa: E402
 
 import bpy  # noqa: E402
 from mathutils import Vector  # noqa: E402
 
-SEQUENCES = ("turntable", "exploded", "steps")
-DEFAULT_FRAMES = {"turntable": 72, "exploded": 36, "steps": 18}
-DEFAULT_HOLD = {"turntable": 0, "exploded": 12, "steps": 8}
+SEQUENCES = ("turntable", "exploded", "steps", "joint", "pose")
+NAMED = {"joint": 1, "pose": 2}     # what follows the sequence's own name: a joint; the pose it starts in and the pose it ends in
+DEFAULT_FRAMES = {"turntable": 72, "exploded": 36, "steps": 18, "joint": 36, "pose": 36}
+DEFAULT_HOLD = {"turntable": 0, "exploded": 12, "steps": 8, "joint": 12, "pose": 12}
 DEFAULT_FPS = 24
 LIFT_OF_DIAGONAL = 1.0 / 3.0        # where a part without an approach hint or an exploded offset comes from: straight above
 BACKGROUND = (1.0, 1.0, 1.0)        # what the frames lie over in the video
 CONTAINERS = {"mp4": ("MPEG4", "H264"), "webm": ("WEBM", "WEBM")}
 # what a frame of each sequence is called where the settings name kinds of views (`floor.views`): not the
 # manual's own `exploded` and `step`, so that what a project set for its manual does not reach into a video
-KINDS = {"turntable": "turntable", "exploded": "exploded-sequence", "steps": "steps-sequence"}
+KINDS = {"turntable": "turntable", "exploded": "exploded-sequence", "steps": "steps-sequence", "joint": "joint-sequence",
+         "pose": "pose-sequence"}
+LIGHTS_TOL = 1e-5                   # of a light's distance from the turntable's axis: how far it may stray in the camera's picture
 
 
 def options(argv):
@@ -110,11 +160,15 @@ def options(argv):
     if len(argv) < 4 or argv[3] not in SEQUENCES:
         raise SystemExit(__doc__)
     sequence = argv[3]
+    named = argv[4:4 + NAMED.get(sequence, 0)]
+    if len(named) < NAMED.get(sequence, 0) or any(n.startswith("--") for n in named):
+        raise SystemExit("joint: name the joint, as motion.json has it" if sequence == "joint" else
+                         "pose: name two poses of motion.json, the one the sequence starts in and the one it ends in")
     opts = {"group": None, "frames": None, "hold": None, "fps": str(DEFAULT_FPS), "elevation": None, "start": None, "view": None,
-            "direction": None, "size": None, "exposure": None, "engine": None, "preview": False, "lines": False, "return": False,
-            "webm": False, "frames-only": False}
-    flags = ("preview", "lines", "return", "webm", "frames-only")
-    i = 4
+            "direction": None, "size": None, "exposure": None, "engine": None, "pose": None, "outliner": None, "up": None, "preview": False,
+            "lines": False, "return": False, "and-back": False, "webm": False, "frames-only": False}
+    flags = ("preview", "lines", "return", "and-back", "webm", "frames-only")
+    i = 4 + len(named)
     while i < len(argv):
         a = argv[i]
         if a.startswith("--") and a[2:] in flags:
@@ -123,10 +177,18 @@ def options(argv):
             opts[a[2:]] = argv[i + 1]; i += 2
         else:
             raise SystemExit(f"unknown argument {a}")
-    for name, sequences in (("group", ("turntable",)), ("elevation", ("turntable",)), ("start", ("turntable",)), ("return", ("exploded",)),
-                            ("view", ("exploded", "steps")), ("direction", ("exploded", "steps")), ("hold", ("exploded", "steps"))):
+    still = ("exploded", "steps", "joint", "pose")          # the sequences whose camera stands still
+    for name, sequences in (("group", ("turntable", "joint", "pose")), ("elevation", ("turntable",)), ("start", ("turntable",)), ("return", ("exploded",)),
+                            ("pose", ("joint",)), ("and-back", ("pose",)), ("view", still), ("direction", still), ("hold", still),
+                            ("up", still)):
         if opts[name] not in (None, False) and sequence not in sequences:
-            raise SystemExit(f"--{name} belongs to {' and '.join(sequences)}, not to {sequence}")
+            raise SystemExit(f"--{name} belongs to {', '.join(sequences[:-1]) + ' and ' + sequences[-1] if len(sequences) > 1 else sequences[0]}, "
+                             f"not to {sequence}")
+    opts["named"] = named
+    if opts["outliner"] is not None and opts["outliner"] not in OUTLINERS:
+        raise SystemExit(f"--outliner: one of {', '.join(OUTLINERS)}, not {opts['outliner']!r}")
+    if opts["outliner"] is not None and not opts["lines"]:
+        raise SystemExit("--outliner says what draws the outlines, and a moving picture has none unless --lines asks for them")
 
     def whole(name, default, least):
         value = opts[name]
@@ -154,6 +216,13 @@ def options(argv):
     try:
         opts["stands"] = (views.stands(opts["view"]) if opts["view"] is not None else
                           views.direction(opts["direction"]) if opts["direction"] is not None else None)
+        if opts["up"] is not None:
+            opts["up"] = views.up(opts["up"])
+            if opts["stands"] is not None:
+                opts["stands"] = views.turned(opts["stands"], opts["up"])
+            elif sequence == "steps":
+                raise SystemExit("--up turns a camera that --view or --direction places; without them a steps sequence takes "
+                                 "its camera, and what is up in it, from the instructions")
     except views.ViewError as e:
         raise SystemExit(str(e))
     if opts["size"] is not None:
@@ -227,6 +296,38 @@ def main(argv):
         print(e, file=sys.stderr)
         return 2
     scene = project.scene
+    motion = posed = None
+    if sequence in NAMED:
+        if not (project.dir / joints.FILE).is_file():
+            raise SystemExit(f"{sequence} moves the joints of a scene, and {project_dir} has no {joints.FILE} beside its scene.json; "
+                             "a scene alone has a turntable and an exploded sequence")
+        try:
+            motion = joints.load(project.dir / joints.FILE, scene)
+        except joints.MotionError as e:
+            print(e, file=sys.stderr)
+            return 2
+        try:
+            if sequence == "joint":
+                swept = joints.meant(motion, opts["named"][0])
+                if not swept:
+                    raise SystemExit(f"joint: {opts['named'][0]!r} is not a joint of {joints.FILE}; it has {', '.join(sorted(motion.joints)) or 'none'}")
+                led = [j for j in swept if "follows" in motion.joints[j]]
+                if led:
+                    leader = motion.joints[led[0]]["follows"]["joint"]
+                    raise SystemExit(f"joint: {led[0]!r} follows {leader!r} and goes where that joint takes it; ask for {leader!r}, "
+                                     "which moves it too")
+                if not any(joints.moved_by(motion, j) for s in swept for j in [s] + joints.followers(motion, s)):
+                    raise SystemExit(f"joint: {opts['named'][0]!r} moves no occurrence of the scene; there is nothing to draw moving")
+                others = joints.values(motion, opts["pose"])
+                # each joint through its own range, all of them at once; what follows them is set from them
+                ways = [timeline.joint_values(motion.joints[j]["lower"], motion.joints[j]["upper"], opts["frames"], opts["hold"]) for j in swept]
+                posed = [joints.settled(motion, dict(others, **dict(zip(swept, now)))) for now in zip(*ways)]
+            else:
+                posed = [joints.settled(motion, at) for at in
+                         timeline.pose_values(joints.values(motion, opts["named"][0]), joints.values(motion, opts["named"][1]),
+                                              opts["frames"], opts["hold"], opts["and-back"])]
+        except (joints.PoseError, timeline.TimelineError) as e:
+            raise SystemExit(f"{sequence}: {e}")
     group = opts["group"]
     if group is not None:
         if group not in scene.assemblies:
@@ -237,17 +338,22 @@ def main(argv):
     settings, settings_path = load_settings(project.dir)
     settings["exposure"] = opts["exposure"] if opts["exposure"] is not None else settings["still_exposure"]
     name = sequence + ("-" + slug(group) if group is not None else "")
+    if sequence in NAMED:
+        name = sequence + "-" + "-to-".join(slug(n) for n in opts["named"]) + ("-" + slug(group) if group is not None else "")
     frames_dir = out_dir / f"{name}-frames"
     container = "webm" if opts["webm"] else "mp4"
     if opts["size"] is not None and not opts["frames-only"] and container == "mp4" and (opts["size"][0] % 2 or opts["size"][1] % 2):
         raise SystemExit(f"--size: H.264 takes even numbers of pixels, got {opts['size'][0]}x{opts['size'][1]}; "
                          "give even ones, or --webm, or --frames-only")
     t0 = time.time()
-    r = Renderer(project, meshes, settings, frames_dir, opts["preview"], opts["engine"], opts["lines"])
+    r = Renderer(project, meshes, settings, frames_dir, opts["preview"], opts["engine"], opts["lines"], opts["outliner"])
     if frames_dir.is_dir():
         for stale in frames_dir.glob("frame-*.png"):       # a shorter run must not leave frames of a longer one behind
             stale.unlink()
     frames_dir.mkdir(parents=True, exist_ok=True)
+    for other in CONTAINERS:                               # nor a video that this run does not write again: the receipt would lie beside it
+        if (opts["frames-only"] or other != container) and (out_dir / f"{name}.{other}").is_file():
+            (out_dir / f"{name}.{other}").unlink()
     if opts["size"] is None:
         r.set_resolution(r.long_side(), settings["aspect"])
     else:
@@ -283,25 +389,57 @@ def main(argv):
         except timeline.TimelineError as e:
             raise SystemExit(str(e))
         reach = (mx - mn).length
+        r.turn_lights()
+        rest = [lo.location.copy() for lo in r.lights]
+        first, strayed = None, 0.0
         for n, (turned, stands) in enumerate(path, 1):
-            r.turn_lights(turned)
+            r.turn_lights(turned, target)                 # round the camera's axis, not the scene's
             r.frame_camera(stands, timeline.UP, target, scale, reach)
+            # where each light is in the camera's own frame: the same at every frame, or the lighting changes on the way round
+            seen = [r.cam.matrix_world.inverted() @ lo.location for lo in r.lights]
+            first = first or seen
+            strayed = max([strayed] + [(a - b).length for a, b in zip(seen, first)])
             frames.append(r.render_frame(name_of(n), members, kind=KINDS[sequence], turned_deg=round(turned * 180.0 / 3.141592653589793, 4),
                                          stands=[round(v, 6) for v in stands]))
             log(f"{name} {n}/{len(path)}: {frames[-1]['seconds']}s")
         r.turn_lights()
+        allowed = LIGHTS_TOL * max([(Vector((at.x - target.x, at.y - target.y, 0.0))).length for at in rest] + [1e-3])
+        if strayed > allowed:
+            r.checks["problems"].append(f"{name}: a light strays {strayed:.6f} m in the camera's picture during the turn; the lighting changes on the way round")
         described.update({"shown": members, "camera": {"type": "ORTHO", "target_m": [round(v, 6) for v in target], "ortho_scale_m": scale,
                                                         "elevation_deg": timeline.ISO_ELEVATION_DEG if opts["elevation"] is None else opts["elevation"],
                                                         "start_deg": timeline.ISO_AZIMUTH_DEG if opts["start"] is None else opts["start"],
-                                                        "turns": 1.0, "lights_turn_with_the_camera": True}})
+                                                        "turns": 1.0, "lights_turn_with_the_camera": True,
+                                                        "lights_stray_in_the_camera_s_frame_m": round(strayed, 9), "lights_may_stray_m": round(allowed, 9)}})
     else:
-        members = list(r.obj_of)
-        try:
-            plan = explode.resolve(scene, meshes, settings)
-        except ValueError as e:
-            raise SystemExit(str(e))
-        offsets_mm = plan["offsets_mm"]
-        if sequence == "exploded":
+        members = r.group_members(group) if group is not None else list(r.obj_of)
+        if not members:
+            raise SystemExit(f"--group: assembly {group!r} has no occurrences")
+        plan, moves, placed = None, {}, {}
+        if motion is None:
+            try:
+                plan = explode.resolve(scene, meshes, settings)
+            except ValueError as e:
+                raise SystemExit(str(e))
+            offsets_mm = plan["offsets_mm"]
+        if motion is not None:
+            # where everything that a joint moves is at each set of values the sequence comes to, worked out once for each
+            drawn = set(members)
+            for at in posed:
+                key = tuple(sorted(at.items()))
+                if key not in placed:
+                    placed[key] = {oid: world for oid, world in joints.worlds(motion, scene, at).items() if oid in drawn}
+            timed = [("joints", at) for at in posed]
+            varying = sorted(j for j in motion.joints if len({at[j] for at in posed}) > 1)
+            if group is not None and not any(set(names) & set(varying) for oid, names in motion.moved.items() if oid in drawn):
+                raise SystemExit(f"--group: nothing of {group!r} moves in this sequence; there is nothing to draw moving")
+            described.update({"motion": {"file": joints.FILE, "sha256": motion.sha256, "source": motion.source}, "joints": motion.joints,
+                              "varying_joints": varying,
+                              "moving_occurrences": [oid for oid, names in motion.moved.items() if set(names) & set(varying) and oid in drawn],
+                              **({"joint": opts["named"][0], "joints_swept": swept, "other_joints_at": opts["pose"] or "zero"}
+                                 if sequence == "joint" else
+                                 {"from_pose": opts["named"][0], "to_pose": opts["named"][1], "returns": opts["and-back"]})})
+        elif sequence == "exploded":
             moves = {oid: offsets_mm[g["id"]] for g in plan["groups"] for oid in g["occurrence_ids"]}
             if not any(any(abs(v) > 1e-9 for v in off) for off in moves.values()):
                 raise SystemExit("exploded: no top-level group of this scene moves in its exploded view; there is nothing to draw apart")
@@ -328,8 +466,13 @@ def main(argv):
             described.update({"steps": [{"index": st.index, "id": st.step.id, "adds": st.added, "deferred": st.deferred} for st in r.states],
                               "starts": [{"occurrence_id": oid, "offset_mm": [round(v, 3) for v in moves[oid]], "source": sources[oid]}
                                          for st in r.states for oid in st.added]})
-        # one camera for the whole sequence, framing every pose of it: seated, and as far out as anything goes
-        pts = [p for oid in members for p in corners(oid)] + [p for oid, off in moves.items() for p in corners(oid, off)]
+        # one camera for the whole sequence, framing every pose of it: seated, and as far out as anything goes;
+        # for joints, what stands still and what moves at every place it comes to
+        if motion is not None:
+            pts = ([p for oid in members if oid not in motion.moved for p in corners(oid)]
+                   + [p for worlds in placed.values() for oid, world in worlds.items() for p in r.occurrence_corners(oid, world)])
+        else:
+            pts = [p for oid in members for p in corners(oid)] + [p for oid, off in moves.items() for p in corners(oid, off)]
         mn, mx = aabb_of(pts)
         first_view = project.instructions.views[project.instructions.steps[0].view] if sequence == "steps" and opts["stands"] is None else None
         if first_view is not None:
@@ -340,7 +483,12 @@ def main(argv):
             if opts["stands"] is not None:
                 stands, up = opts["stands"]
             else:
-                stands, up = plan["direction"] or settings["overview_direction"], timeline.UP
+                stands, up = (plan["direction"] if plan else None) or settings["overview_direction"], timeline.UP
+                if opts["up"] is not None:
+                    try:
+                        stands, up = views.turned((stands, up), opts["up"])
+                    except views.ViewError as e:
+                        raise SystemExit(str(e))
             d = Vector(stands).normalized()
             ctr = (mn + mx) / 2
             r.aim(ctr + d * max(r.scene_radius * 4, (mx - mn).length * 4, 1e-3), ctr, Vector(up))
@@ -353,6 +501,12 @@ def main(argv):
                        "location_m": list(r.cam.matrix_world.translation)})
         described["camera"] = camera
         for n, (step, fraction) in enumerate(timed, 1):
+            if step == "joints":                          # a joint or a pose: what the joints move, where these values put it
+                at = fraction
+                frames.append(r.render_frame(name_of(n), members, kind=KINDS[sequence], worlds=placed[tuple(sorted(at.items()))],
+                                             values={j: round(v, 6) for j, v in sorted(at.items())}))
+                log(f"{name} {n}/{len(timed)}: {frames[-1]['seconds']}s")
+                continue
             if step is None:                              # exploded: every group that far out
                 shown = members
                 offsets_m = {oid: [v * fraction * to_m for v in off] for oid, off in moves.items()} if fraction else None
@@ -384,7 +538,8 @@ def main(argv):
         "blender": bpy.app.version_string, "python": sys.version.split()[0], "engine": r.engine, "denoiser": r.denoiser,
         "preview": opts["preview"], "samples": r.samples(), "exposure": settings["exposure"],
         "floor_shadow_catcher": r.floor is not None and KINDS[sequence] in settings["floor"]["views"],
-        "lines": r.lines_enabled, "lines_max_triangles": settings["lines"]["preview_max_triangles" if opts["preview"] else "max_triangles"],
+        "lines": r.lines_enabled, "outliner": r.outliner if r.lines_enabled else None,
+        "lines_max_triangles": settings["lines"]["preview_max_triangles" if opts["preview"] else "max_triangles"],
         "settings_file": str(settings_path.relative_to(project.dir)) if settings_path else None,
         "settings_sha256": receipts.sha256_text(json.dumps(settings, sort_keys=True)),
         "project_dir": str(project.dir), "scene_id": scene.id, "scene_units": scene.units, "unit_factor_to_m": r.factor,

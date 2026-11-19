@@ -228,6 +228,21 @@ def test_the_fixture_draws_the_base_in_its_finish_and_the_pin_as_render_json_say
 
 # ------------------------------------------------------------------ where a still's camera stands
 
+def test_another_axis_may_be_up_in_the_picture():
+    """A scene declared Z up that stands otherwise, or a long thing that should lie across the picture."""
+    assert views.up("+y") == (0.0, 1.0, 0.0) and views.up("-X") == (-1.0, 0.0, 0.0) and views.up("0, 2,1") == (0.0, 2.0, 1.0)
+    for wrong in ("up", "0,0,0", "1,2"):
+        with pytest.raises(views.ViewError, match="--up: expected an axis"):
+            views.up(wrong)
+    assert views.turned(views.stands("iso"), views.up("+y")) == ((1.0, -1.0, 0.8), (0.0, 1.0, 0.0))
+    assert views.turned(views.direction("0.4,1,0.3"), views.up("-x")) == ((0.4, 1.0, 0.3), (-1.0, 0.0, 0.0))
+    # a camera cannot look along what is to be up in its picture
+    with pytest.raises(views.ViewError, match="looks along .* which cannot be up in its picture"):
+        views.turned(views.stands("+y"), views.up("+y"))
+    with pytest.raises(views.ViewError, match="cannot be up in its picture"):
+        views.turned(views.stands("-z"), views.up("0,0,5"))
+
+
 # ------------------------------------------------------------------ the viewer's models
 
 def test_a_project_that_chose_nothing_keeps_one_flat_material():

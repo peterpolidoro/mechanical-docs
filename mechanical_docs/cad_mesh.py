@@ -1,6 +1,7 @@
 """CAD stage, run inside FreeCADCmd: STEP parts -> render meshes with identity preserved.
 
     FreeCADCmd mechanical_docs/cad_mesh.py --pass PROJECT_DIR OUT_DIR [-- --linear-deflection MM] [-- --angular-deflection DEG] [-- --max-triangles N]
+                                                                      [-- --surface-parts PART_ID[,PART_ID]]
 
 PROJECT_DIR is a project (scene, inventory and the rest) or a directory that
 holds a scene alone, as mechanical-cad's flatten step writes one.
@@ -18,6 +19,19 @@ convention (metres, +Y up; see gltf.to_gltf_frame). OUT_DIR/meshes.json maps
 every part and occurrence to its mesh with hashes, tolerances and the checks
 performed, so the render stage can verify it is rendering the declared
 geometry. Transforms are not applied here: instances stay instances.
+
+Surface models. A part whose STEP holds faces and no solid is a problem, and
+the render stage refuses a receipt with problems: for a part mirrored from a
+CAD system a missing solid is a broken export. A supplier's model is sometimes
+surfaces and nothing else, though, and can be drawn as well as any solid.
+`--surface-parts` names such parts, by their ids in the scene. A part named
+there is meshed from its faces; its record says `surface_model` and that its
+volume is not checked (a surface encloses none that could be held against the
+mesh), its triangles are turned as a closed mesh's are only when the mesh is
+closed, and the stage's last line names it. Every other check stands. A part
+that is named and has a solid is a problem of its own, and so is a name that
+is no part of the scene: the option says what is known of a part, it does not
+silence a finding. A part that is not named is treated as before.
 
 Units: FreeCAD/OCCT converts every STEP to millimetres on import, whatever the
 file declares (an inch panel reads back as 1193.8 mm). The file's own declared
@@ -104,7 +118,7 @@ def tessellate_part(shape, linear_deflection, angular_deflection_rad):
                                           "faces_meshed_by_fallback": fallbacks, "area_without_triangles_mm2": empty_area, "shape_area_mm2": shape.Area}
 
 
-def mesh_part(part, out_dir, linear_deflection, angular_deflection_deg, max_triangles=None):
+def mesh_part(part, out_dir, linear_deflection, angular_deflection_deg, max_triangles=None, surface=False):
     src = part.asset.resolved
     record = {"part_id": part.id, "source": {"path": part.asset.path, "sha256": part.asset.sha256, "units": part.asset.units, "format": part.asset.format},
               "step": {}, "mesh": {}, "checks": {}}
@@ -133,7 +147,11 @@ def mesh_part(part, out_dir, linear_deflection, angular_deflection_deg, max_tria
                       "extent_mm": [bb.XLength, bb.YLength, bb.ZLength], "volume_mm3": shape.Volume}
     if not valid:
         problems.append("shape is not valid")
-    if len(shape.Solids) < 1:
+    if surface:
+        record["step"]["surface_model"] = True
+        if shape.Solids:
+            problems.append(f"named a surface model, and its STEP holds {len(shape.Solids)} solid(s); take it out of --surface-parts")
+    elif len(shape.Solids) < 1:
         problems.append("no solid in STEP")
     ext = part.identifying_dimensions_mm.get("extent")
     if ext is not None:
@@ -166,14 +184,19 @@ def mesh_part(part, out_dir, linear_deflection, angular_deflection_deg, max_tria
         return record, None
     sv = gltf.signed_volume(positions, indices)
     flipped = False
-    if sv < 0:
+    # the sign of a mesh's volume says which way its triangles are wound only when the mesh is closed
+    if sv < 0 and (not surface or whole["whole_shape_closed"]):
         # inward winding: flip every triangle and every normal
         indices = [indices[k + j] for k in range(0, len(indices), 3) for j in (0, 2, 1)]
         normals = [(-x, -y, -z) for x, y, z in normals]
         sv = -sv; flipped = True
     deviation = abs(sv - shape.Volume) / shape.Volume if shape.Volume else float("inf")
     record["checks"]["whole_shape_volume_deviation"] = abs(whole["whole_shape_volume_mm3"] - shape.Volume) / shape.Volume if shape.Volume else float("inf")
-    if part.volume_mm3:
+    if surface:
+        deviation = None
+        record["checks"]["whole_shape_volume_deviation"] = None
+        record["checks"]["volume"] = "not checked: a surface model encloses no volume that could be held against the mesh"
+    if part.volume_mm3 and not surface:
         record["checks"]["declared_volume_deviation"] = abs(shape.Volume - part.volume_mm3) / part.volume_mm3
     # normals should point the same way as their triangles: count disagreements and
     # the surface area they cover (folded slivers at seams are many but tiny)
@@ -199,7 +222,7 @@ def mesh_part(part, out_dir, linear_deflection, angular_deflection_deg, max_tria
     warnings = list(deferred_warnings)
     tess_agree = abs(sv - whole["whole_shape_volume_mm3"]) <= 0.005 * max(abs(sv), 1e-9)
     record["checks"]["tessellations_agree"] = tess_agree
-    if deviation > 0.02:
+    if deviation is not None and deviation > 0.02:
         if tess_agree:
             # two independent tessellations agree with each other but not with GProp's B-rep
             # volume: the B-rep integral is the doubtful number, the render mesh is consistent
@@ -236,11 +259,12 @@ def mesh_part(part, out_dir, linear_deflection, angular_deflection_deg, max_tria
 
 
 def main(argv):
+    argv = [a for a in argv if a != "--"]     # the bare `--` that keeps FreeCADCmd from reading this script's options
     if len(argv) < 2:
         raise SystemExit(__doc__)
-    argv = [a for a in argv if a != "--"]     # the bare `--` that keeps FreeCADCmd from reading this script's options
     project_dir, out_dir = Path(argv[0]), Path(argv[1])
     linear = 0.05; angular = 10.0; max_triangles = 50000
+    surface = []
     i = 2
     while i < len(argv):
         if argv[i] == "--linear-deflection":
@@ -249,6 +273,8 @@ def main(argv):
             angular = float(argv[i + 1]); i += 2
         elif argv[i] == "--max-triangles":
             max_triangles = int(argv[i + 1]) if argv[i + 1] != "none" else None; i += 2
+        elif argv[i] == "--surface-parts" and i + 1 < len(argv):
+            surface += [name.strip() for name in argv[i + 1].split(",") if name.strip()]; i += 2
         else:
             raise SystemExit(f"unknown argument {argv[i]}")
     try:
@@ -257,12 +283,17 @@ def main(argv):
     except ManifestError as e:
         print(e, file=sys.stderr)
         return 2
-    out_dir.mkdir(parents=True, exist_ok=True)
     sc = project.scene
+    unknown = sorted(set(surface) - set(sc.parts))
+    if unknown:
+        raise SystemExit(f"--surface-parts: {', '.join(unknown)} {'is' if len(unknown) == 1 else 'are'} no part of the scene; "
+                         f"its parts: {', '.join(sc.parts)}")
+    surface = sorted(set(surface))
+    out_dir.mkdir(parents=True, exist_ok=True)
     parts = {}
     all_ok = True
     for part in sc.parts.values():
-        rec, path = mesh_part(part, out_dir, linear, angular, max_triangles)
+        rec, path = mesh_part(part, out_dir, linear, angular, max_triangles, part.id in surface)
         parts[part.id] = rec
         ok = rec["checks"].get("passed", False)
         all_ok &= ok
@@ -270,7 +301,8 @@ def main(argv):
         log(f"{part.name[:40]}: unit {st.get('declared_unit')} valid={st.get('valid')} solids={st.get('solids')} extent_mm={[round(v, 3) for v in st.get('extent_mm', [])]} "
             f"volume_mm3={st.get('volume_mm3', 0):.3f} -> {me.get('triangles', 0)} triangles"
             f"{' (deflection ' + str(round(me['linear_deflection'], 3)) + ' mm after ' + str(len(me['tessellation_attempts'])) + ' attempts)' if len(me.get('tessellation_attempts', [])) > 1 else ''}, "
-            f"volume deviation {rec['checks'].get('volume_deviation', float('nan')):.3%}, "
+            + ("a surface model, volume not checked, " if st.get("surface_model") else
+               f"volume deviation {rec['checks'].get('volume_deviation', float('nan')):.3%}, ") +
             f"{'OK' if ok else 'PROBLEMS: ' + '; '.join(rec['checks'].get('problems', []))}")
     occurrences = [{"id": o.id, "part_id": o.part_id, "mesh": parts[o.part_id]["mesh"].get("file"), "parent_id": o.parent_id, "path": o.path,
                     "world": o.world, "world_translation": T.translation(o.world)} for o in sc.occurrences.values()]
@@ -288,8 +320,12 @@ def main(argv):
                    "vertex normal orientation (<5% of the mesh area disagreeing; shading only)", "mesh bounds vs B-rep bounds"],
         "not_checked": ["interference between occurrences", "assembly path", "visual appearance"],
     }
+    if surface:
+        receipt["surface_parts"] = surface
+        receipt["not_checked"].append(f"the volume of the parts named as surface models: {', '.join(surface)}")
     receipts.write_json(out_dir / "meshes.json", receipt)
-    log(f"wrote {out_dir / 'meshes.json'}; all checks passed: {all_ok}")
+    log(f"wrote {out_dir / 'meshes.json'}; all checks passed: {all_ok}"
+        + (f"; meshed from their faces as surface models, volume not checked: {', '.join(surface)}" if surface else ""))
     return 0 if all_ok else 1
 
 

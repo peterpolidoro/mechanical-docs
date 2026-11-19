@@ -1,6 +1,6 @@
 """Moving pictures, without Blender: where a camera stands at each frame, and how far a part has come.
 
-Three sequences are drawn by motion.py from what is worked out here:
+Five sequences are drawn by motion.py from what is worked out here:
 
 - a **turntable**: the camera goes once round the vertical axis through the
   middle of what is drawn, at one height, and the picture's scale is the one
@@ -9,7 +9,9 @@ Three sequences are drawn by motion.py from what is worked out here:
   where they are installed to the offsets of the exploded view (explode.py),
   and may come back;
 - a **steps sequence**: in the order of a project's instructions, what each
-  step adds arrives at its seat while what earlier steps added stays.
+  step adds arrives at its seat while what earlier steps added stays;
+- a **joint** taken through its range and back, and one **pose** going over
+  into another (joints.py has what a joint is and where it puts a part).
 
 A frame is one picture. A movement of `move` frames starts slowly and ends
 slowly (`smooth`). Everything here is in the scene's +Z-up frame; angles are
@@ -68,6 +70,15 @@ def turntable(frames, elevation_deg=ISO_ELEVATION_DEG, start_deg=ISO_AZIMUTH_DEG
     return out
 
 
+def about_vertical(point, pivot, angle):
+    """`point` taken round the vertical axis through `pivot` by `angle`, counter-clockwise as seen from above.
+    What a turntable does with its lights: the camera goes round the axis through the middle of what is drawn,
+    and a light that goes round the same axis stays where it was in the camera's picture."""
+    c, s = math.cos(angle), math.sin(angle)
+    x, y = point[0] - pivot[0], point[1] - pivot[1]
+    return (pivot[0] + c * x - s * y, pivot[1] + s * x + c * y, point[2])
+
+
 def camera_axes(stands, up=UP):
     """(to the right, upwards) in the picture of a camera that stands in the direction `stands` and looks back
     at the middle, with `up` upwards: the axes render.py's `aim` gives its camera."""
@@ -113,13 +124,14 @@ def exploded_fractions(move, hold, back=False):
     """How far apart the groups are at each frame, from 0 (installed) to 1 (the exploded view's offsets).
 
     `hold` frames at rest, `move` frames apart, `hold` frames at rest; with `back`, the same movement the other
-    way, ending one frame short of the first so that the sequence closes when it is played again.
+    way, ending one frame short of the first so that the sequence closes when it is played again. Without
+    frames at rest the first frame is already one step out, and the way back then goes all the way home.
     """
     _count(move, "frames")
     _count(hold, "hold", 0)
     out = [0.0] * hold + [smooth(k / move) for k in range(1, move + 1)] + [1.0] * hold
     if back:
-        out += [smooth(k / move) for k in range(move - 1, 0, -1)]
+        out += [smooth(k / move) for k in range(move - 1, 0, -1)] + ([] if hold else [0.0])
     return out
 
 
@@ -162,6 +174,33 @@ def step_starts(scene, states, exploded_offsets_mm, lift_mm):
             else:
                 out[oid] = ([0.0, 0.0, float(lift_mm)], "lift")
     return out
+
+
+# -------------------------------------------------------------------- joints
+
+def joint_values(lower, upper, move, hold):
+    """The value of a joint at each frame of a sequence that takes it through its range: `hold` frames at its
+    lower limit, `move` frames up to its upper limit, `hold` frames there and `move` frames back, ending one
+    frame short of the first so that the sequence closes when it is played again. Both limits are drawn as
+    they are given, and nothing beyond them."""
+    if not lower < upper:
+        raise TimelineError(f"a joint's range runs from its lower limit up to its upper one, got {lower!r} to {upper!r}")
+    span = upper - lower
+    return [lower if f == 0.0 else upper if f == 1.0 else lower + span * f for f in exploded_fractions(move, hold, True)]
+
+
+def pose_values(a, b, move, hold, back=False):
+    """The values of every joint at each frame of a sequence that takes one pose over into another: {joint: value}
+    for one frame after another. `a` and `b` give a value to the same joints. Every joint has come the same
+    share of its way at every frame, so the movement is a straight line between the two poses in the joints'
+    own values; `hold` frames rest at each end, and with `back` the same way is gone again, as an exploded
+    sequence comes back."""
+    if set(a) != set(b):
+        raise TimelineError(f"two poses of the same joints are needed, got {sorted(a)} and {sorted(b)}")
+    if all(a[j] == b[j] for j in a):
+        raise TimelineError("the two poses are the same: nothing moves between them")
+    return [{j: a[j] if f == 0.0 else b[j] if f == 1.0 else a[j] + (b[j] - a[j]) * f for j in a}
+            for f in exploded_fractions(move, hold, back)]
 
 
 def duration_s(frames, fps):

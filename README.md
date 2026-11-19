@@ -14,7 +14,8 @@ FreeCAD STEP-to-mesh stage, a Blender render stage (Cycles with
 OpenImageDenoise through the `bpy` wheel, EEVEE on the Guix Blender), pictures
 outside a manual from a scene alone, still (`still.py`) and moving
 (`motion.py`: a turntable, an exploded sequence, the steps of a project, as
-video; both since 2026-11-19), an
+video; both since 2026-11-19; and, where a scene has a `motion.json`, a joint
+taken through its range or one pose going over into another, a draft), an
 optional viewer export, and a document stage that writes one `manual.json` and
 generates HTML and a Typst PDF from it, with an output checker. Three synthetic
 fixtures build end to end. The enclosure snapshot (37 parts, 155 occurrences)
@@ -62,13 +63,31 @@ Or stage by stage, each in its Guix role (see [docs/environment.md](docs/environ
 ```sh
 python3 -m mechanical_docs inventory-template PROJECT      # draft inventory.json from a scene (required = installed occurrences)
 python3 -m mechanical_docs inspect examples/three-part-fixture --json build/inspect.json
-FreeCADCmd mechanical_docs/cad_mesh.py --pass examples/three-part-fixture build/meshes [-- --max-triangles 50000]
-pixi run -e render render examples/three-part-fixture build/meshes/meshes.json build/renders [--preview] [--engine BLENDER_EEVEE_NEXT] [--no-lines] [--groups pin-pair] [--reuse build/renders-old]
+FreeCADCmd mechanical_docs/cad_mesh.py --pass examples/three-part-fixture build/meshes [-- --max-triangles 50000] [-- --surface-parts PART_ID,PART_ID]
+pixi run -e render render examples/three-part-fixture build/meshes/meshes.json build/renders [--preview] [--engine BLENDER_EEVEE_NEXT] [--no-lines] [--outliner line-art] [--groups pin-pair] [--reuse build/renders-old]
 blender -b --python mechanical_docs/render.py -- examples/three-part-fixture build/meshes/meshes.json build/renders --engine BLENDER_EEVEE_NEXT
 .pixi/envs/render/bin/python mechanical_docs/viewer.py examples/three-part-fixture build/meshes/meshes.json build/renders [--budget 200000]   # optional: viewer GLBs beside the renders
 python3 -m mechanical_docs manual examples/three-part-fixture --renders build/renders --out build/manual --meshes build/meshes/meshes.json [--appendix]
 python3 -m mechanical_docs check build/manual
 ```
+
+A part whose STEP file holds faces and no solid is a problem to the CAD
+stage, and the render stage refuses a receipt with problems: for a part
+mirrored from a CAD system a missing solid is a broken export. A supplier's
+model is sometimes surfaces and nothing else. `--surface-parts` names such
+parts; each is then meshed from its faces, recorded as a surface model whose
+volume is not checked, and named in the stage's last line. A part that is
+named and has a solid is a problem of its own.
+
+Outlines are Freestyle's unless a project says otherwise, and Freestyle
+draws none on a view with more triangles than its budget
+(`lines.max_triangles` in `render.json`), which leaves a whole assembly
+without them. `lines.outliner` in `render.json`, or `--outliner` of
+`render.py`, `still.py` and `motion.py`, hands them to Grease Pencil Line Art: `line-art`
+for every view, `mixed` for the views above Freestyle's budget only. Line
+Art draws the whole enclosure, 2.4 million triangles, in a quarter of a
+minute. A view's record says what drew its outlines, and `--reuse` renders
+again a view that the other outliner drew.
 
 A picture outside a manual needs a scene and no more. `mechanical-cad`'s
 flatten step writes a directory with `scene.json`, its assets and, when the
@@ -78,13 +97,20 @@ project has finishes, `finishes.json`; the CAD stage meshes it as it is, and
 ```sh
 FreeCADCmd mechanical_docs/cad_mesh.py --pass SCENE_DIR build/meshes
 blender -b --python mechanical_docs/still.py -- SCENE_DIR build/meshes/meshes.json build/stills --views iso,+z [--group ASSEMBLY_ID] [--size 1600x1200] [--exposure -2.5] [--preview] --engine BLENDER_EEVEE_NEXT
+blender -b --python mechanical_docs/still.py -- SCENE_DIR build/meshes/meshes.json build/stills --direction 0.3,1,0.15 --up +x --pose NAME [--at "JOINT=VALUE,JOINT=VALUE"] --engine BLENDER_EEVEE_NEXT
 pixi run -e render still SCENE_DIR build/meshes/meshes.json build/stills --views iso,+z      # Cycles, the reference look
 ```
 
 The views are `iso`, `iso-back`, `below`, `below-back`, `+x`, `-x`, `+y`,
 `-y`, `+z` and `-z`, the names and cameras of `mechanical-cad`'s
-`tools/picture.py`; `--direction X,Y,Z` stands the camera anywhere else. The
-pictures are `still-<view>.png` with a receipt, `stills.json`.
+`tools/picture.py`; `--direction X,Y,Z` stands the camera anywhere else, and
+`--up` names what points up in the picture where Z is not wanted (a scene
+that is declared Z up and stands otherwise; a long thing laid across the
+picture). The pictures are `still-<view>.png` with a receipt, `stills.json`.
+With `--pose NAME`, or `--at` and values, the joints of the scene's
+`motion.json` are where the pose or the values put them, and what they move
+is drawn there (`still-pose-<pose>-<view>.png`); the receipt holds the file's
+hash and every joint's value.
 
 A part is drawn in the look `render.json` names for it (`looks`), else in
 its finish of the optional `finishes.json` (a colour, how metallic, how
@@ -101,6 +127,8 @@ Blender's own FFmpeg writes from them (H.264 in an MP4 file, or VP9 with
 blender -b --python mechanical_docs/motion.py -- SCENE_DIR build/meshes/meshes.json build/motion turntable [--group ASSEMBLY_ID] [--frames 72] --engine BLENDER_EEVEE_NEXT
 blender -b --python mechanical_docs/motion.py -- SCENE_DIR build/meshes/meshes.json build/motion exploded [--frames 36] [--hold 12] [--return] --engine BLENDER_EEVEE_NEXT
 blender -b --python mechanical_docs/motion.py -- PROJECT_DIR build/meshes/meshes.json build/motion steps [--frames 18] [--hold 8] --engine BLENDER_EEVEE_NEXT
+blender -b --python mechanical_docs/motion.py -- SCENE_DIR build/meshes/meshes.json build/motion joint NAME [--pose POSE] [--group ASSEMBLY_ID] [--frames 36] [--hold 12] --engine BLENDER_EEVEE_NEXT
+blender -b --python mechanical_docs/motion.py -- SCENE_DIR build/meshes/meshes.json build/motion pose FROM TO [--and-back] [--group ASSEMBLY_ID] [--frames 36] [--hold 12] --engine BLENDER_EEVEE_NEXT
 pixi run -e render motion SCENE_DIR build/meshes/meshes.json build/motion turntable      # Cycles, the reference look
 ```
 
@@ -108,11 +136,22 @@ A `turntable` takes the camera once round what is drawn, at one scale and
 with the lights turning with it. An `exploded` sequence moves the top-level
 groups apart to the offsets of the exploded view and, with `--return`, back.
 `steps` needs a project with instructions and follows them: what a step adds
-arrives at its seat while what earlier steps added stays. Each writes
-`<name>-frames/frame-0001.png` and so on, `<name>.mp4` and a receipt,
-`<name>.json`. Frames have no outlines unless `--lines` asks for them, and no
-floor unless `floor.views` in `render.json` names their kind. All three are
-illustrations: where a part comes from in them is no insertion path.
+arrives at its seat while what earlier steps added stays. `joint` and `pose`
+need a `motion.json` beside the scene (docs/input-contract.md, "Joints and
+poses"; a draft that `mechanical-cad` writes, not yet part of its layout):
+`joint` takes one joint from its lower limit to its upper one and back, with
+what follows it at its ratio and the other joints at zero or where `--pose`
+puts them, and `pose` takes every joint from one named pose to another;
+`--group` draws one subassembly alone, where the rest of the scene would
+stand in front of what moves. Where the camera stands still (all but the
+turntable) `--view` or `--direction` places it and `--up` turns it. Each
+writes `<name>-frames/frame-0001.png` and so on, `<name>.mp4` and a receipt,
+`<name>.json`. Frames have no outlines unless `--lines` asks for them (with
+`--outliner line-art` a whole assembly's cost seconds, not minutes), and no
+floor unless `floor.views` in `render.json` names their kind. All five are
+illustrations: where a part comes from in them is no insertion path, and a
+joint shows where its record says the parts can go, with nothing checked on
+the way.
 
 `--groups` (or `inspection_groups` in `render.json`) renders named subassemblies
 alone as inspection views; `joint_views` in `render.json` renders per-joint

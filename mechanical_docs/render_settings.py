@@ -111,11 +111,18 @@ DEFAULTS = {
     "step_context_alpha": 0.3,
     "lines": {
         "enabled": True,
+        # What draws the outlines. "freestyle": Blender's Freestyle, within the budget below and
+        # nothing above it. "line-art": Grease Pencil Line Art for every view, whatever its size
+        # (it draws a whole assembly in about a minute where Freestyle takes half an hour).
+        # "mixed": Freestyle within the budget and Line Art above it.
+        "outliner": "freestyle",
         # Freestyle's view map grows superlinearly with edge count; above this many visible
-        # triangles a view is rendered without line art and the receipt says so
+        # triangles Freestyle draws nothing: the view has no outlines, and the receipt says so,
+        # unless the outliner is "mixed"
         "max_triangles": 3000000,
         "preview_max_triangles": 400000,
         "crease_angle_deg": 110,
+        # colours, and widths in pixels of the image, for both outliners
         "subject": {"color": [0.06, 0.06, 0.08], "thickness": 2.6},
         "context": {"color": [0.42, 0.43, 0.46], "thickness": 0.9},
     },
@@ -134,6 +141,30 @@ OVERRIDABLE = {"engine", "samples", "preview_samples", "cycles_samples", "cycles
 JOINT_VIEW_FIELDS = {"id", "joint_id", "occurrence_ids", "direction", "context", "context_style"}
 EXPLODED_FIELDS = {"enabled", "direction", "spread", "fill", "groups"}
 JOINT_CONTEXT_STYLES = ("faded", "hidden")
+OUTLINERS = ("freestyle", "line-art", "mixed")
+
+
+def outliner_for(lines_enabled, outliner, triangles, budget):
+    """What draws the outlines of a view that shows `triangles` triangles:
+    "freestyle", "line-art", or None when it gets none. `outliner` is the
+    setting `lines.outliner` and `budget` the triangle budget of Freestyle."""
+    if not lines_enabled:
+        return None
+    if outliner == "line-art":
+        return "line-art"
+    if triangles <= budget:
+        return "freestyle"
+    return "line-art" if outliner == "mixed" else None
+
+
+def outline_words(lines_enabled, outliner, budget):
+    """What a manual's technical page says of a render's outlines. `outliner`
+    is None for a receipt from before there was a choice: Freestyle's."""
+    if lines_enabled and outliner == "line-art":
+        return "outlines by Line Art on every view"
+    if lines_enabled and outliner == "mixed":
+        return f"outlines by Freestyle up to {budget} visible triangles and by Line Art above"
+    return f"line art {'on' if lines_enabled else 'off'} up to {budget} visible triangles"
 
 
 class SettingsError(ValueError):
@@ -239,6 +270,8 @@ def load_settings(project_dir):
         raise SettingsError("render.json: inspection_groups must be a list of assembly ids")
     if s["joint_context_style"] not in JOINT_CONTEXT_STYLES:
         raise SettingsError(f"render.json: joint_context_style must be one of {JOINT_CONTEXT_STYLES}")
+    if s["lines"].get("outliner") not in OUTLINERS:
+        raise SettingsError(f"render.json: lines.outliner must be one of {OUTLINERS}, got {s['lines'].get('outliner')!r}")
     s["joint_views"] = check_joint_views(s["joint_views"], s["joint_context_style"])
     s["exploded_view"] = check_exploded_view(s["exploded_view"])
     for k in ("exposure", "still_exposure"):

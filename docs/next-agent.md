@@ -53,16 +53,37 @@ sibling repository before planning anything here. In short:
   `timeline.py` has what needs no Blender (where the camera stands at each
   frame, the one scale of a turn, how far apart the groups are, where a
   step's additions come from). Blender's own FFmpeg writes the video on both
-  routes, so no package was added. Not done: a joint moved through its range,
-  which waits for joints as a record in the layout of `mechanical-cad`.
+  routes, so no package was added. A joint moved through its range and one
+  pose going over into another are built against a draft (the same day,
+  later): `mechanical-cad` derives `motion.json` beside the scene from a
+  record of joints that is not yet part of its layout, `joints.py` reads it
+  and says where a joint puts what it moves, `motion.py joint NAME` and
+  `pose FROM TO` draw it (of the whole scene, or of one subassembly with
+  `--group`), and `still.py --pose NAME` or `--at JOINT=VALUE,...` draws one
+  position. A frame with whole poses is `Renderer.render_frame(worlds=...)`,
+  and a turntable's lights go round its camera's axis
+  (`Renderer.turn_lights(angle, pivot)`). Shown on the three-part fixture
+  with a file written by hand, and on `mechanical-cad`'s mechanical example,
+  the first real joints drawn here: a lever with its two gears, and a unit
+  turning in its arc slot.
 - The CAD stage takes its own options under FreeCADCmd since 2026-11-19,
   after a bare `--` (`--pass PROJECT OUT -- --max-triangles 20000`); before,
-  FreeCADCmd took them for its own and stopped.
-- Outlines on full-assembly views: Grease Pencil Line Art was tried without a
-  window on the enclosure's scene on 2026-11-19 and runs in both Blenders,
-  the whole enclosure in under a minute where Freestyle took 32. It is not
-  built in. docs/environment.md has the measurements, what the pictures
-  showed and what is open before it is.
+  FreeCADCmd took them for its own and stopped. One of them,
+  `--surface-parts PART_ID,...`, names the parts that are models of
+  surfaces: a part without a solid stays a problem, which stops the render
+  stage, unless it is named there, and a named part that has a solid is a
+  problem too.
+- `--up` of `still.py` and `motion.py` (2026-11-19) names what points up in
+  a picture whose camera stands still. A scene is drawn in the frame it
+  declares; one that is declared Z up and stands otherwise, as the
+  mechanical example's does, comes out lying on its side without it.
+- Outlines on full-assembly views: Grease Pencil Line Art is built into
+  `render.py` since 2026-11-19, behind `lines.outliner` in `render.json`
+  (`freestyle`, the default; `line-art`; `mixed`) and `--outliner` of
+  `render.py`, `still.py` and `motion.py`. It draws the enclosure's overview in a quarter
+  of a minute where Freestyle took 32. A view's record says what drew its
+  outlines, and `reuse.py` judges by it. No project has switched it on.
+  docs/environment.md has what was found on the way and the measurements.
 - Still open here: a single-part preview (render one STEP without a
   hand-written scene), proposed on 2026-11-10 and neither approved nor
   started; `mechanical-cad`'s `tools/picture.py` draws a part without this
@@ -86,7 +107,9 @@ code.
   the look `render.json` names, else its finish, else the default),
   `views.py` (the named camera positions of a still), `timeline.py` (a
   moving picture's frames: a turntable's camera, an exploded sequence, the
-  steps), `explode.py` (which
+  steps, a joint's or a pose's values), `joints.py` (`motion.json`: the
+  joints and poses of a scene, and where a joint puts what it moves),
+  `explode.py` (which
   top-level groups the exploded
   view moves and by how much), `render_settings.py` (looks, budgets,
   long-part thumbnail rules, `inspection_groups`, `joint_views`,
@@ -95,7 +118,8 @@ code.
   parts, `--groups` subassembly inspection views, `joint_views` close-ups,
   the exploded view, `--reuse` of earlier views), `still.py` (Blender: a
   picture of a scene alone, outside a manual), `motion.py` (Blender: a
-  turntable, an exploded sequence or a project's steps as frames and video),
+  turntable, an exploded sequence, a project's steps, a joint or a pose as
+  frames and video),
   `viewer.py` (bpy: the two
   viewer GLBs with decimation and anchors), `document.py` + `html.py` + `typst.py`
   (front page with the overview and the exploded view with page references,
@@ -104,7 +128,7 @@ code.
   compact build record, `viewer/hotspots.json`, the build scope's phase
   quantities, checklist and step chapters, `--appendix`), `checks.py`,
   `cli.py` (`inspect`, `inventory-template`, `manual`, `check`). `tests/` has
-  168 pure-Python tests (all passing on 2026-11-19) plus four in
+  221 pure-Python tests (all passing on 2026-11-19) plus six in
   `tests/test_cad_stage.py`, which run FreeCAD on the units fixture when
   `FreeCADCmd` is on PATH (the CAD role) and are skipped otherwise.
 - `examples/three-part-fixture/` (now with `supplement.json`: three synthetic
@@ -162,8 +186,11 @@ owns the project-side configuration.
 3. Open the viewer GLBs in a browser (model-viewer) once Linux's site build
    is up; fix normals, scale or anchor placement if anything looks wrong.
 4. Line art on full-assembly views: Freestyle stays off above the budget (the
-   overview and the exploded view are without outlines). Evaluate Grease
-   Pencil Line Art in background mode before raising it; do not block on it.
+   overview and the exploded view are without outlines), and Grease Pencil
+   Line Art draws them when the project's `render.json` says
+   `"lines": {"outliner": "mixed"}` or `"line-art"`. Whether the enclosure's
+   manual is drawn so is Peter's to say; four of its views both ways are on
+   one sheet in that project's ignored `.cache/pictures/line-art-comparison.png`.
 5. No further group instances beyond `:1` as inspection views for now
    (Linux, 2026-10-22); the pages already count every instance of a definition.
 6. The site pages are generated by the Linux agent from `manual.json` and

@@ -230,6 +230,72 @@ converted from sRGB to linear, its `metallic` and `roughness`, and its
 0.35 shows through it. The outlines are those of opaque parts: an edge
 behind a translucent part is not drawn.
 
+## Joints and poses (`motion.json`, optional; a draft)
+
+How the things of a scene move (2026-11-19). A project keeps its joints and
+poses in one hand-edited file of its own in `mechanical-cad`, which this
+pipeline never reads; that record is a draft there and no part of its layout
+yet, so this file's form may still change. `mechanical-cad` derives
+`motion.json` from it and writes it **beside** `scene.json`. Nothing in a
+manual reads it, it is no input of a mesh or of a manual's views, and
+`input_hashes` does not hold it: only the `joint` and `pose` sequences of
+`motion.py` and a still with `--pose` or `--at` (`still.py`) read it, and
+their receipts pin it by its hash. `joints.py` is
+the reader. `schema_version` is the integer `1`. Top level: `schema_version`,
+`scene` (the relative path of the loaded scene), `source` (optional object of
+plain provenance values), `joints`, `moved` and `poses` (optional):
+
+```json
+{
+  "schema_version": 1,
+  "scene": "scene.json",
+  "source": {"kind": "mechanical-cad-motion", "file": "motion.toml", "sha256": "…"},
+  "joints": {
+    "lever": {"kind": "revolute", "origin_mm": [0, 0, 12], "direction": [0, 1, 0], "lower": -20.0, "upper": 35.0, "unit": "deg"},
+    "slide": {"kind": "prismatic", "origin_mm": [40, 0, 12], "direction": [1, 0, 0], "lower": 0.0, "upper": 12.0, "unit": "mm"},
+    "pinion": {"kind": "revolute", "origin_mm": [0, 0, 40], "direction": [0, 1, 0], "lower": -87.5, "upper": 50.0, "unit": "deg",
+               "follows": {"joint": "lever", "ratio": -2.5}}
+  },
+  "moved": {"<occurrence id>": ["lever"], "<another occurrence id>": ["lever", "slide"], "<a third>": ["pinion"]},
+  "poses": {"open": {"lever": 30.0}, "closed": {"lever": -20.0, "slide": 0.0}}
+}
+```
+
+| Field | Rule |
+| --- | --- |
+| a joint | six fields, all explicit: `kind`, `revolute` or `prismatic`; `origin_mm`, a point on the joint's line, in millimetres whatever the scene's units; `direction`, a unit vector along it; `lower` and `upper`, its limits, the first below the second; `unit`, `deg` for a revolute joint and `mm` for a prismatic one. A joint's name may hold `@`, `/`, `:` and spaces: a joint of an assembly that the scene places several times is there once for each place, as `NAME@WHERE` |
+| `follows` | optional, on a joint that another one drives, as a gear is driven by the gear it meshes with: `joint`, a joint of the file that follows nothing itself, and `ratio`, a number that is not 0, how far this joint goes for one degree or millimetre of that one. Its `lower` and `upper` are the ratio times that joint's limits, in order |
+| `moved` | occurrence ids of the scene as keys; each value names the joints that move the occurrence, outermost first, each once. An occurrence that is not there stands still |
+| `poses` | named poses (may be empty or absent); a pose gives joints a value within their limits. A joint it does not name is at zero. No pose names a joint that follows another |
+
+`origin_mm` and `direction` are in the frame the scene's own transforms are
+written in, at the position the scene is flattened in, which is every joint's
+zero whether or not zero lies within its limits (a scene declared +Y up is
+turned to +Z up once on loading, and its joints with it). A revolute joint
+turns what it moves about its line by degrees, right-handed along
+`direction`; a prismatic joint slides it along the line by millimetres. With
+the joints at the values v, the world transform of an occurrence is
+T(j1, v1) · T(j2, v2) · … · `transform_world`, j1 being the outermost joint
+that moves it: the innermost joint is applied first, about its line as the
+scene has it, and each joint further out carries the result. A joint that
+follows another is always at its ratio times the value of that joint,
+whatever else is said: every other joint's value is worked out first.
+
+Unknown fields, a wrong schema version, a `scene` that is not the loaded
+scene, a joint with a field missing, a direction that is no unit vector,
+limits out of order, a unit that is not its kind's, a follower of a joint
+that is not there or follows another itself, a follower whose limits are not
+what its ratio makes of its leader's, an occurrence that is not in the scene,
+a joint named twice for one occurrence, and a pose that names a joint the
+file does not define, a follower, or a value outside the joint's limits are
+rejected; all problems are reported together.
+
+**What it changes.** Two moving pictures and nothing else. A joint moved
+through its range shows where the record says the parts can go: nothing is
+checked on the way, and parts may pass through each other in the picture
+(`mechanical-cad` has the check of what is in the way). The canonical poses
+are restored and verified after every frame, as after every other view.
+
 The manual's viewer models carry the looks too (`viewer.py`, "Stage
 outputs"): a part with a finish, or with a look named in `render.json`, has
 that look as its material there.
@@ -373,7 +439,11 @@ in `finishes.json`, and a part with neither is drawn in `default_look`),
 `palette` additions, `engine`,
 `samples`, image sizes, `aspect`, `fill`, outline and arrow styling, the
 line-art budget (`lines.max_triangles`, above which a view is drawn without
-Freestyle and the receipt says so), the long-part thumbnail rules
+Freestyle and the receipt says so), what draws the outlines
+(`lines.outliner`: `freestyle`, the default, within that budget and nothing
+above it; `line-art`, Grease Pencil Line Art for every view; `mixed`,
+Freestyle within the budget and Line Art above it; each view's record names
+the one that drew it as `outliner`), the long-part thumbnail rules
 (`thumbnail_long_aspect`, default 4: a part whose longest extent is at least
 four times the next is turned with its long axis along X, drawn in a wide
 image and given an end view `part-<id>-end.png` looking straight along that
@@ -421,7 +491,8 @@ it (a `#808080` finish read back as 140, 139, 139 with Cycles and 139, 139,
 139 with EEVEE). `floor.views` now names `still` among the views that get the
 shadow-catcher floor. The frames of a moving picture (`motion.py`) are exposed
 as stills are; they get the floor only when `floor.views` names their kind,
-`turntable`, `exploded-sequence` or `steps-sequence`, which it does not by
+`turntable`, `exploded-sequence`, `steps-sequence`, `joint-sequence` or
+`pose-sequence`, which it does not by
 default (`exploded` there is the manual's own exploded view): the floor costs
 Cycles a second pass for every frame.
 
@@ -446,10 +517,10 @@ like after every other. An unknown group id is refused.
 | File | Written by | Content |
 | --- | --- | --- |
 | `inspect.json` | `python3 -m mechanical_docs inspect` | validated parts, occurrences with world transforms, steps with cumulative state (deferred steps flagged), inventory reconciliation with stock records, the supplement's rows and summary (by scope, kind, status; unknown quantities; unplaced rows), the build scope's summary and per-part phase quantities, input hashes |
-| `meshes/<part>.glb`, `meshes/meshes.json` | `cad_mesh.py` (FreeCADCmd) | one GLB per part (metres, +Y up, conversion recorded in the asset extras), declared STEP unit versus manifest unit, STEP validity/bounds/volume, mesh winding and volume checks, tessellation attempts under the per-part triangle budget, hashes |
+| `meshes/<part>.glb`, `meshes/meshes.json` | `cad_mesh.py` (FreeCADCmd) | one GLB per part (metres, +Y up, conversion recorded in the asset extras), declared STEP unit versus manifest unit, STEP validity/bounds/volume, mesh winding and volume checks, tessellation attempts under the per-part triangle budget, hashes; a part whose STEP holds no solid is a problem, unless `--surface-parts` names it: it is then meshed from its faces, its record has `step.surface_model` and `checks.volume` saying that its volume is not checked, the receipt lists it under `surface_parts` and `not_checked`, and every other check stands; a part that is named and has a solid, or a name that is no part of the scene, is refused |
 | `renders/*.png`, `renders/hotspots/*.json`, `renders/render-receipt.json` | `render.py` (Blender) | the look every part was drawn with (`part_looks`: its name, whether it came from `render.json`, `finishes.json` or the default, and its numbers), thumbnails (wide ones plus end views for long parts), overview, the exploded subassembly view (`exploded.png` with the offsets used per group and the group membership in its hotspots), subassembly inspection views (`group-*.png` with occurrence ids, parent and path), joint close-ups (`joint-*.png` with joint id, occurrence ids, context assembly and context occurrences), step and result images; projected occurrence boxes; versions, engine, denoiser, settings hash, per-view hashes, visible triangles and whether line art was drawn, which views were copied from an earlier receipt (`--reuse`: same scene, assets, meshes and engine; the inventory, supplement and build scope may differ, and so may the instructions, which then stale the overview and every step view; a copy is also refused when a joint or exploded specification changed, a step's additions or installed-before set changed, outlines became affordable, or a part the view shows in its own look has another look now (a thumbnail shows its part; the overview, the exploded view and a subassembly view every visible occurrence's part; a joint close-up its subject occurrences; a step what it adds), which catches a changed finish and, since 2026-11-19, a changed `looks` entry or palette entry in `render.json`; a receipt from before that date records no looks, and its views are taken as they always were except those that show a part whose look now comes from `finishes.json`; `reused_from` per view, `stale_reused_views` per receipt), the build scope's file hash and deferred steps, mesh-bounds and pose-restoration checks |
-| `still-<view>.png`, `stills.json` | `still.py` (Blender) | pictures outside a manual, of a directory that needs a scene, its assets and the mesh receipt and nothing else (no inventory, no instructions; `cad_mesh.py` meshes such a directory too): the whole scene, or one subassembly with `--group` (`still-<group>-<view>.png`), every occurrence at its canonical pose and in its look, orthographic, from a named side (`iso`, `iso-back`, `below`, `below-back`, `+x`, `-x`, `+y`, `-y`, `+z`, `-z`: the names and cameras of `mechanical-cad`'s `tools/picture.py`, in the scene's +Z-up frame; straight along Z the picture is a plan with X to the right and Y upwards from above) or from `--direction X,Y,Z` (`still-custom.png`); exposed by `still_exposure` or `--exposure`; the receipt of the run records versions, engine, exposure, the settings' hash, the hashes of the scene, the assets, the finishes and the meshes, `part_looks`, each picture with its hash, camera, where the camera stands, what it shows and whether it has outlines and the floor, and the mesh-bounds and pose-restoration checks; pictures of an earlier run in the same directory are not in it |
-| `<name>-frames/frame-NNNN.png`, `<name>.mp4` or `<name>.webm`, `<name>.json` | `motion.py` (Blender) | moving pictures outside a manual, from the directory a still is made from, `<name>` being `turntable`, `turntable-<group>`, `exploded` or `steps`: a turntable (the whole scene or one subassembly at its canonical poses; the camera once round the vertical axis through the middle of what is drawn, from where `iso` stands unless `--start` and `--elevation` say otherwise, counter-clockwise seen from above, one orthographic scale for the whole turn, the studio's lights turning with the camera; the last frame one step short of the first), an exploded sequence (the top-level groups of `explode.py` moving as rigid bodies from their installed poses to the exploded view's offsets, slowly at both ends, with frames at rest before and after, and back with `--return`; one camera that frames both ends) and a steps sequence (a project with `instructions.json` and `inventory.json`; in the instructions' order what a step adds arrives at its seat and rests while what earlier steps added stays; an occurrence starts from its step's approach hint when the hint is for it, else from its group's place in the exploded view, else from straight above by a third of the scene's diagonal, each recorded with its source; a step outside the build scope is shown and not kept, as in the manual; the camera of the first step's instruction view unless `--view` or `--direction` is given, framing every pose); frames without outlines unless `--lines`, on a transparent background; the video written by Blender's own FFmpeg from the frames over white (H.264 in MP4, which needs even pixel counts, or VP9 in WebM with `--webm`; `--frames-only` stops before it); the receipt records what `stills.json` records and, per frame, its hash and what places it (the angle turned, how far apart, the step and how far its additions have come), the offsets and their sources, the camera, the video's hash, the encoder's versions and what Blender reads back of the file (frames, size, rate), which is checked against what went in; an illustration: the offsets are no insertion paths and an exploded sequence implies no order |
+| `still-<view>.png`, `stills.json` | `still.py` (Blender) | pictures outside a manual, of a directory that needs a scene, its assets and the mesh receipt and nothing else (no inventory, no instructions; `cad_mesh.py` meshes such a directory too): the whole scene, or one subassembly with `--group` (`still-<group>-<view>.png`), every occurrence at its canonical pose and in its look, orthographic, from a named side (`iso`, `iso-back`, `below`, `below-back`, `+x`, `-x`, `+y`, `-y`, `+z`, `-z`: the names and cameras of `mechanical-cad`'s `tools/picture.py`, in the scene's +Z-up frame; straight along Z the picture is a plan with X to the right and Y upwards from above) or from `--direction X,Y,Z` (`still-custom.png`), with `--up` naming what points up in the picture where Z is not wanted; exposed by `still_exposure` or `--exposure`; for a scene with a `motion.json` ("Joints and poses" above), `--pose NAME` and `--at "JOINT=VALUE,..."` draw what the joints move where the pose, and over it the given values, put it (`still-pose-<pose>-<view>.png`, `still-at-<view>.png`), the camera framing it there, the receipt holding `motion.json` with its hash, the pose, the values given and every joint's value; the receipt of the run records versions, engine, exposure, the settings' hash, the hashes of the scene, the assets, the finishes and the meshes, `part_looks`, each picture with its hash, camera, where the camera stands, what it shows and whether it has outlines and the floor, and the mesh-bounds and pose-restoration checks; pictures of an earlier run in the same directory are not in it |
+| `<name>-frames/frame-NNNN.png`, `<name>.mp4` or `<name>.webm`, `<name>.json` | `motion.py` (Blender) | moving pictures outside a manual, from the directory a still is made from, `<name>` being `turntable`, `turntable-<group>`, `exploded` or `steps`: a turntable (the whole scene or one subassembly at its canonical poses; the camera once round the vertical axis through the middle of what is drawn, from where `iso` stands unless `--start` and `--elevation` say otherwise, counter-clockwise seen from above, one orthographic scale for the whole turn, the studio's lights turning with the camera; the last frame one step short of the first), an exploded sequence (the top-level groups of `explode.py` moving as rigid bodies from their installed poses to the exploded view's offsets, slowly at both ends, with frames at rest before and after, and back with `--return`; one camera that frames both ends) and a steps sequence (a project with `instructions.json` and `inventory.json`; in the instructions' order what a step adds arrives at its seat and rests while what earlier steps added stays; an occurrence starts from its step's approach hint when the hint is for it, else from its group's place in the exploded view, else from straight above by a third of the scene's diagonal, each recorded with its source; a step outside the build scope is shown and not kept, as in the manual; the camera of the first step's instruction view unless `--view` or `--direction` is given, framing every pose); and, for a scene with a `motion.json` ("Joints and poses" above), `joint-<joint>`, one joint from its lower limit to its upper one and back with what follows it and the other joints at zero or at `--pose`, and `pose-<from>-to-<to>`, every joint from one named pose to another, both with one camera that stands still and frames what stands still and what moves at every place it comes to, of the whole scene or with `--group` of one subassembly alone (`-<group>` after the name; what the joints move outside it is not drawn), their receipts holding `motion.json` with its hash, the joints as the file has them, and every joint's value at each frame; where the camera stands still, `--up` names what points up in its picture; frames without outlines unless `--lines` (drawn by the outliner of `render.json` or `--outliner`), on a transparent background; the video written by Blender's own FFmpeg from the frames over white (H.264 in MP4, which needs even pixel counts, or VP9 in WebM with `--webm`; `--frames-only` stops before it); the receipt records what `stills.json` records and, per frame, its hash and what places it (the angle turned, how far apart, the step and how far its additions have come), the offsets and their sources, the camera, the video's hash, the encoder's versions and what Blender reads back of the file (frames, size, rate), which is checked against what went in; an illustration: the offsets are no insertion paths and an exploded sequence implies no order |
 | `renders/viewer/assembled.glb`, `exploded.glb`, `viewer-receipt.json` | `viewer.py` (bpy) | one GLB per state: metres, +Y up, one mesh per part shared by every occurrence through nodes, node names = occurrence ids, one parent node per subassembly instance named by its id (nested as in the scene; the top-level groups carry the exploded offsets in `exploded.glb`), the root's own parts under `root-parts`, no textures or Draco; one flat material when the project chose no look for any part, as before 2026-11-19, and otherwise one material for every look that `render.json` names or `finishes.json` gives (the colour linear with the opacity as its alpha, `metallicFactor`, `roughnessFactor`, `alphaMode` `BLEND` where the opacity is below 1, named after the look, its source in `extras`), each part's mesh carrying its own and the parts in the default look the flat one, which is always the first; the looks must be those the render receipt drew, or the export stops; a palette entry's coat is not carried; meshes over their share of the triangle budget (default 200 000 per file, small parts kept whole) collapse-decimated with normals split at sharp edges; the receipt records the budget, per-part triangles before and after, instanced totals, hashes, the offsets (from the render receipt, which must match the project) and one anchor per subassembly instance and for the root parts in both states (bounds centre projected onto the nearest surface, with its outward normal) |
 | `manual/manual.json`, `index.html`, `manual.typ`, `<id>.pdf`, `build-receipt.json`, `viewer/` | `python3 -m mechanical_docs manual [--appendix]` | the single document model and both outputs generated from it: the finished assembly first, then the subassemblies drawn apart with numbered callouts (the subassembly page numbers, one per definition on the instance that shows best, the root's own parts as the next number) and a key with page references (Typst labels) or links (HTML), picture-led parts cards (CAD quantity labelled as such, stock record when recorded, a paper count box with its label beside it), the supplementary items section (existing-design rows), one page per subassembly inspection view (its definition, grouped by the exporter's `document` or else by the id stem, with the instance count, the shown and the other instance ids, per-subassembly counts and a total for all instances only when they are identical in content: same parts and quantities, none flexible or position-overridden; `groups[].definition`, `instance_ids`, `instance_count`, `instances_identical` in manual.json; a document/id-stem disagreement is a finding) and per joint close-up with their "hardware to review" lists, steps, a compact build record; when `renders/viewer/` exists, `viewer/assembled.glb`, `viewer/exploded.glb` (hash-checked copies) and `viewer/hotspots.json` (schema 1, agreed with the Linux CAD agent 2026-10-23: `states` with GLB paths, drawn triangles and offsets, `triangle_budget`, `subassemblies[]` with the manual's number, definition, instance ids, shown instance, `instances_identical`, anchors per state and the shown instance's union box in `overview.png` and `exploded.png`, `root_parts` likewise) beside `manual.json`, whose `exploded_view` (image, offsets, callouts with boxes) and `viewer` (files, hashes, budget) sections point at them; `--appendix` adds the technical appendix (full part ids, Vault ids, occurrence lists, every hash, every supplement row and field, stock records), which manual.json always carries |
 | `manual/check-report.json`, `manual/checks/` | `python3 -m mechanical_docs check` | HTML/PDF/manual.json agreement (parts, CAD quantities, subassembly sections with their part counts and instance counts, exploded-view callouts and the PDF key's page numbers against the pages that carry the subassembly headings, joint sections, supplementary rows and the per-group/per-joint hardware lists, step order; supplementary rows separate from CAD parts with unknown quantities kept unknown), link and image resolution, viewer files against their receipt and `hotspots.json` against the manual's numbers, page rasters and greyscale copies |
@@ -458,8 +529,8 @@ Each stage refuses inputs whose hashes differ from the receipt it consumes for
 the inputs that stage depends on: the render stage compares meshes.json with
 the scene and asset hashes; `--reuse` compares the earlier receipt's scene and
 asset hashes and then judges every view on its own (instructions, joint and
-exploded specifications, step states, outline budget, the looks of the parts
-it shows); the manual stage
+exploded specifications, step states, outline budget and outliner, the looks
+of the parts it shows); the manual stage
 compares the render receipt with the scene, asset, instruction and finish
 hashes and
 the step records with the current build scope (a recorded stock count, a new

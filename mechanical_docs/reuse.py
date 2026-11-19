@@ -7,10 +7,21 @@ are detected per view so a copy is never silently stale: a joint close-up
 whose specification (occurrences, context, context style, explicit direction)
 differs from the record, an exploded view whose offsets or explicit direction
 changed, the overview and the steps when the instructions changed, a step
-whose additions or installed-before set changed, and any view drawn without outlines that the current
-line budget would now outline (a lower budget never discards an outlined
-image: the budget caps cost, it is not a look), and any view that shows a part
+whose additions or installed-before set changed, any view whose outlines would
+now be drawn otherwise (below), and any view that shows a part
 in a look other than the one it was drawn with.
+
+Outlines. A view's record says whether it has outlines (`lines`) and what
+drew them (`outliner`: "freestyle" or "line-art"; a record from before there
+was a choice has none, and its outlines are Freestyle's). A view drawn
+without outlines is stale when the current settings would outline it: with
+Freestyle because the budget now allows it, with Line Art always. A lower
+budget never discards an image Freestyle outlined: the budget caps cost, it is
+not a look, and under "mixed" Freestyle is what is wanted wherever there is a
+picture of it. The two outliners draw different lines, so a view outlined by
+the one that the current settings would not use for it is stale: Freestyle's
+under "line-art", Line Art's under "freestyle", and under "mixed" Line Art's
+where Freestyle is within its budget.
 
 Looks. A receipt records for every part the look it was drawn with
 (looks.py: a palette entry named in render.json, a finish of finishes.json,
@@ -28,6 +39,8 @@ Other appearance changes (group direction, thumbnail rules, the studio,
 --no-lines) are not detected: name those views with --views.
 """
 from __future__ import annotations
+
+from mechanical_docs.render_settings import outliner_for
 
 
 def normalised(v):
@@ -65,7 +78,32 @@ def look_reason(old, looks):
     return None
 
 
-def stale_reason(old, joint_specs, lines_enabled, budget, exploded=None, instructions_changed=False, step_states=None, looks=None):
+def outline_reason(old, lines_enabled, budget, outliner="freestyle"):
+    """Why a view's outlines make it stale, or None. Nothing is said of a view
+    whose record does not hold its triangle count and whether it has lines,
+    nor when this run draws no lines at all (--no-lines is not a look that is
+    detected)."""
+    tris = old.get("visible_triangles")
+    if tris is None or old.get("lines") is None or not lines_enabled:
+        return None
+    was = (old.get("outliner") or "freestyle") if old["lines"] else None
+    now = outliner_for(True, outliner, tris, budget)
+    if was == now:
+        return None
+    if was is None:
+        if now == "freestyle":
+            return f"line art is now within the budget ({tris} <= {budget}) but the earlier view has none"
+        return "Line Art now draws this view's outlines and the earlier view has none"
+    if was == "freestyle":
+        # a lower cap keeps what Freestyle drew, and so does "mixed"; only "line-art" asks for other lines
+        return "the earlier view's outlines are Freestyle's and Line Art draws them now" if outliner == "line-art" else None
+    if now == "freestyle":
+        return "the earlier view's outlines are Line Art's and Freestyle draws them now"
+    return "the earlier view's outlines are Line Art's, which this run does not use"
+
+
+def stale_reason(old, joint_specs, lines_enabled, budget, exploded=None, instructions_changed=False, step_states=None, looks=None,
+                 outliner="freestyle"):
     """None when `old` (a view record from an earlier receipt) can be reused
     under the current settings, else a short reason.
 
@@ -77,7 +115,8 @@ def stale_reason(old, joint_specs, lines_enabled, budget, exploded=None, instruc
     (the overview camera and every step follow it). step_states: view id ->
     (added, before) of the current derivation, so a step whose cumulative state
     changed (a build scope deferring an earlier step) is rendered again.
-    looks: see look_reason; None leaves looks out of the judgement."""
+    looks: see look_reason; None leaves looks out of the judgement. outliner:
+    the setting `lines.outliner` of the current run."""
     if old.get("kind") == "overview" and instructions_changed:
         return "instructions changed (the overview uses the first step's camera)"
     if old.get("kind") in ("step", "step-result"):
@@ -126,9 +165,6 @@ def stale_reason(old, joint_specs, lines_enabled, budget, exploded=None, instruc
             return reason
     # the budget is a cost cap, not a look: an image that already has outlines is
     # still right under a lower cap (the enclosure overview keeps its 32-minute
-    # Freestyle lines); only newly affordable outlines make a copy stale
-    tris = old.get("visible_triangles")
-    if tris is not None and old.get("lines") is not None:
-        if lines_enabled and tris <= budget and not old["lines"]:
-            return f"line art is now within the budget ({tris} <= {budget}) but the earlier view has none"
-    return None
+    # Freestyle lines); newly affordable outlines make a copy stale, and so do
+    # outlines of the outliner that is not the one in use
+    return outline_reason(old, lines_enabled, budget, outliner)

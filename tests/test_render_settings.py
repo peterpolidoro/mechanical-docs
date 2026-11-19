@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from mechanical_docs.render_settings import DEFAULTS, SettingsError, load_settings
+from mechanical_docs.render_settings import DEFAULTS, OUTLINERS, SettingsError, load_settings, outline_words, outliner_for
 
 
 def test_defaults_without_file(tmp_path):
@@ -102,3 +102,41 @@ def test_a_still_has_an_exposure_of_its_own(tmp_path):
             (tmp_path / "render.json").write_text(json.dumps({key: bad}))
             with pytest.raises(SettingsError, match=f"{key} must be a number of stops"):
                 load_settings(tmp_path)
+
+
+def test_the_outliner_is_freestyle_unless_a_project_says_otherwise(tmp_path):
+    s, _ = load_settings(tmp_path)
+    assert s["lines"]["outliner"] == "freestyle" and OUTLINERS == ("freestyle", "line-art", "mixed")
+    (tmp_path / "render.json").write_text(json.dumps({"lines": {"outliner": "line-art"}}))
+    s, _ = load_settings(tmp_path)
+    assert s["lines"]["outliner"] == "line-art"
+    assert s["lines"]["subject"] == DEFAULTS["lines"]["subject"] and s["lines"]["max_triangles"] == DEFAULTS["lines"]["max_triangles"]
+    for wrong in ("lineart", "Freestyle", None, True):
+        (tmp_path / "render.json").write_text(json.dumps({"lines": {"outliner": wrong}}))
+        with pytest.raises(SettingsError, match="lines.outliner must be one of"):
+            load_settings(tmp_path)
+
+
+def test_what_draws_the_outlines_of_a_view():
+    budget = 600000
+    # Freestyle, within its budget and nothing above it: what there was before there was a choice
+    assert outliner_for(True, "freestyle", 600000, budget) == "freestyle"
+    assert outliner_for(True, "freestyle", 600001, budget) is None
+    # Line Art has no budget
+    assert outliner_for(True, "line-art", 604, budget) == "line-art"
+    assert outliner_for(True, "line-art", 2436488, budget) == "line-art"
+    # mixed: Freestyle where it is affordable, Line Art where it is not
+    assert outliner_for(True, "mixed", 600000, budget) == "freestyle"
+    assert outliner_for(True, "mixed", 600001, budget) == "line-art"
+    # no lines at all
+    for outliner in OUTLINERS:
+        assert outliner_for(False, outliner, 10, budget) is None
+
+
+def test_what_a_manual_says_of_a_render_s_outlines():
+    # the words there were before there was a choice, for Freestyle and for a receipt that names no outliner
+    assert outline_words(True, None, 600000) == "line art on up to 600000 visible triangles"
+    assert outline_words(True, "freestyle", 600000) == "line art on up to 600000 visible triangles"
+    assert outline_words(False, "line-art", 600000) == "line art off up to 600000 visible triangles"
+    assert outline_words(True, "line-art", 600000) == "outlines by Line Art on every view"
+    assert outline_words(True, "mixed", 600000) == "outlines by Freestyle up to 600000 visible triangles and by Line Art above"

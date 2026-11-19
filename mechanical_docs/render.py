@@ -1,7 +1,7 @@
 """Render stage, run inside Blender: part thumbnails, an overview and one or two images per step.
 
     blender -b --python mechanical_docs/render.py -- PROJECT_DIR MESHES_JSON OUT_DIR [--preview] [--views a,b] [--engine E] [--no-lines]
-                                                     [--groups ASSEMBLY_ID,...] [--reuse RENDER_DIR]
+                                                     [--outliner freestyle|line-art|mixed] [--groups ASSEMBLY_ID,...] [--reuse RENDER_DIR]
 
 Reads the validated project (manifest.py), the CAD stage's meshes.json and the
 project's optional render.json (illustration settings: looks, sizes). A part is
@@ -35,6 +35,18 @@ pose (the scene's +Z-up frame, scaled to metres exactly once), and renders:
     step-NN-<step>-result.png  the same step with the addition seated (only when
                              the step has an approach hint)
 
+Outlines. What draws them is the setting `lines.outliner` of render.json, or
+--outliner. "freestyle", the default: Blender's Freestyle, for a view whose
+visible triangles are within the budget (`lines.max_triangles`), and no
+outlines above it, where Freestyle takes tens of minutes. "line-art": Grease
+Pencil Line Art for every view, whatever its size. "mixed": Freestyle within
+the budget and Line Art above it. Both draw what a view calls its subject with
+the thick dark line and its context with the thin grey one, at the widths in
+pixels the settings give, in orthographic and in perspective views. For Line
+Art the meshes are joined at import (Renderer.weld) and the lines are an
+object that exists during the render call alone (Renderer.add_line_art, which
+says why). A view's record says what drew its outlines (`outliner`).
+
 Every step image uses the instruction view's eye/target/up and one orthographic
 scale computed from the whole procedure (final poses and approach poses), so the
 camera does not move between steps. Canonical poses are restored and verified
@@ -47,8 +59,8 @@ same scene, assets, instructions, meshes, engine and quality instead of
 rendering them again (the inventory and the supplement never change an image,
 so they may differ); only views named in --views, absent from that receipt, or
 stale under the current settings (a joint view whose specification changed, a
-view whose line-art state would differ under the current budget, a view that
-shows a part whose look or finish changed; see reuse.py)
+view whose outlines would now be drawn where it has none or by the other
+outliner, a view that shows a part whose look or finish changed; see reuse.py)
 are rendered. Other appearance changes need --views. Each copied
 view keeps its own record plus `reused_from`, so the receipt stays honest about
 what was rendered when and under which settings.
@@ -70,12 +82,12 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
-from mechanical_docs import explode, geometry, looks, receipts  # noqa: E402
+from mechanical_docs import explode, geometry, looks, receipts, timeline  # noqa: E402
 from mechanical_docs import transforms as T  # noqa: E402
 from mechanical_docs.manifest import ManifestError, load_project  # noqa: E402
 from mechanical_docs.names import slug  # noqa: E402
 from mechanical_docs.procedure import approach_pose, derive_states  # noqa: E402
-from mechanical_docs.render_settings import load_settings  # noqa: E402
+from mechanical_docs.render_settings import OUTLINERS, load_settings, outliner_for  # noqa: E402
 from mechanical_docs.reuse import stale_reason  # noqa: E402
 
 import bpy  # noqa: E402  (only inside Blender)
@@ -154,10 +166,27 @@ def context_members(scene, ctx_ids):
     return out
 
 
+# How Blender's Line Art modifier is set for a view (add_line_art). Contours and
+# creases, as the Freestyle line sets select silhouettes, borders and creases;
+# no intersection lines, which would draw every place where two parts touch.
+# A crease is an edge where the surface turns by more than the crease angle,
+# not every edge the mesh marks as sharp: with those, each chamfer and each
+# shallow step of a bought part gets a line, which Freestyle does not draw.
+LINE_ART = {
+    "use_contour": True, "use_crease": True, "use_loose": False, "use_material": False, "use_edge_mark": False,
+    "use_intersection": False, "use_light_contour": False, "use_shadow": False,
+    "use_crease_on_sharp": False, "use_crease_on_smooth": False,
+    "use_back_face_culling": True, "use_multiple_levels": False, "level_start": 0,
+}
+
+
 class Renderer:
-    def __init__(self, project, meshes, settings, out_dir, preview, engine=None, lines=True):
+    def __init__(self, project, meshes, settings, out_dir, preview, engine=None, lines=True, outliner=None):
         self.project = project
         self.lines_enabled = lines and settings["lines"]["enabled"]
+        self.outliner = outliner or settings["lines"]["outliner"]
+        if self.outliner not in OUTLINERS:
+            raise SystemExit(f"the outliner is one of {', '.join(OUTLINERS)}, not {self.outliner!r}")
         self.last_view = {}
         self.scene = project.scene
         self.meshes = meshes
@@ -223,6 +252,40 @@ class Renderer:
                 bpy.data.objects.remove(other)
             self.mesh_of[pid] = mesh
             log(f"mesh {pid}: {len(mesh.vertices)} vertices, {len(mesh.polygons)} triangles, bounds {[round(v, 4) for v in mn]}..{[round(v, 4) for v in mx]} m, bounds check {'ok' if ok else 'FAILED'}")
+            if self.lines_enabled and self.outliner != "freestyle":
+                self.weld(mesh)
+
+    def weld(self, mesh):
+        """Join the vertices of a mesh that lie in one place, for Line Art.
+
+        The CAD stage writes every face of a part as a patch of its own, so
+        each boundary between two faces is there twice. Line Art takes an edge
+        with one face for an outline: on such a mesh it draws the seam of every
+        cylinder and the line where a fillet meets a flat, and draws each edge
+        twice. Joined, the faces share their edges, and an edge is drawn where
+        the surface turns by more than the crease angle. A triangle with no
+        area goes.
+
+        The shading must stay what it was. Blender keeps a corner's normal
+        relative to the faces around its vertex, so joining vertices would
+        turn the normals; they are carried through the joining as plain
+        vectors and set again afterwards."""
+        import bmesh
+        import numpy
+        normals = numpy.empty(len(mesh.loops) * 3, dtype=numpy.float32)
+        mesh.corner_normals.foreach_get("vector", normals)
+        mesh.attributes.new("md_corner_normal", "FLOAT_VECTOR", "CORNER").data.foreach_set("vector", normals)
+        bm = bmesh.new()
+        bm.from_mesh(mesh)
+        bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-6)
+        bm.to_mesh(mesh)
+        bm.free()
+        kept = mesh.attributes["md_corner_normal"]
+        normals = numpy.empty(len(mesh.loops) * 3, dtype=numpy.float32)
+        kept.data.foreach_get("vector", normals)
+        mesh.attributes.remove(kept)
+        mesh.normals_split_custom_set(normals.reshape(-1, 3))
+        mesh.update()
 
     def instantiate(self):
         """One object per occurrence sharing its part's mesh, at the canonical pose."""
@@ -395,6 +458,121 @@ class Renderer:
             c = spec["color"]
             ls.linestyle.color = (c[0], c[1], c[2]); ls.linestyle.thickness = spec["thickness"]; ls.linestyle.alpha = 1.0
         scn.render.use_freestyle = True
+        self.line_art_mats = {}
+        # Grease Pencil strokes are drawn without anti-aliasing unless the final render samples them
+        # several times: two lines closer than their width then run into each other in steps, which
+        # reads as a broken line (the two edges of the enclosure tank's rim, a wall's thickness apart)
+        if hasattr(scn.grease_pencil_settings, "aa_samples"):
+            scn.grease_pencil_settings.aa_samples = 16
+
+    # ------------------------------------------------------------ Line Art
+
+    def metres_per_pixel(self):
+        """How long a pixel of the picture is in the scene: everywhere, for an
+        orthographic camera; at one metre in front of it, for a perspective one."""
+        scn, cd = self.scn, self.cam.data
+        long_px = max(scn.render.resolution_x, scn.render.resolution_y)      # sensor_fit AUTO: the longer side
+        if cd.type == "ORTHO":
+            return cd.ortho_scale / long_px
+        return 2 * math.tan(cd.angle / 2) / long_px
+
+    def add_line_art(self):
+        """The outlines of this view as Grease Pencil strokes: one object with a
+        Line Art modifier for what the view draws thin (the context) and one for
+        what it draws thick (the subject), as the two Freestyle line sets are.
+        Returns what remove_line_art has to take away again.
+
+        The object exists for the render call alone. The modifier is worked out
+        at every update of the scene, and framing a view makes several; on the
+        enclosure a view took two to three times as long with the object in the
+        scene from the start.
+
+        The lines are drawn in front of everything: they are the visible lines
+        already, and tested against the surfaces again they are cut up by the
+        faces they lie on. A width is a length in the scene, so a width in
+        pixels is turned into one for this camera: one length for an
+        orthographic picture, and for a perspective one a length that grows
+        with the distance from the camera, set point by point.
+
+        Line Art reads every mesh of the scene, the ones a view hides from the
+        render as well. They hide no line, and they cost their triangles: a
+        thumbnail of the enclosure's tank, 604 triangles, took eight seconds
+        with them and a quarter of a second without. Each hidden object is
+        therefore taken out of Line Art by its own switch for the call."""
+        scn, L = self.scn, self.s["lines"]
+        gpd = bpy.data.grease_pencils_v3.new("md_lineart")
+        gp = bpy.data.objects.new("md_lineart", gpd)
+        gp.show_in_front = True
+        gp.use_grease_pencil_lights = False                  # a line has its colour, whatever the studio shines on it
+        per_px = self.metres_per_pixel()
+        first = True
+        # the layer made last lies on top: the subject's lines over the context's
+        for name, coll, spec in (("context", self.coll_context, L["context"]), ("subject", self.coll_subject, L["subject"])):
+            if not coll.objects:
+                continue
+            mat = self.line_art_mats.get(name)
+            if mat is None:
+                mat = bpy.data.materials.new(f"md_lineart_{name}")
+                bpy.data.materials.create_gpencil_data(mat)
+                c = spec["color"]
+                mat.grease_pencil.color = (c[0], c[1], c[2], 1.0)
+                mat.grease_pencil.show_stroke = True; mat.grease_pencil.show_fill = False
+                self.line_art_mats[name] = mat
+            gpd.layers.new(name).use_lights = False
+            gpd.materials.append(mat)
+            mod = gp.modifiers.new(f"md_lineart_{name}", "LINEART")
+            mod.source_type = "COLLECTION"; mod.source_collection = coll
+            mod.target_layer = name; mod.target_material = mat
+            for prop, value in LINE_ART.items():
+                setattr(mod, prop, value)
+            mod.crease_threshold = math.radians(L["crease_angle_deg"])
+            mod.radius = spec["thickness"] * per_px           # measured: a line comes out as wide as this, not twice
+            mod.opacity = 1.0
+            # the second modifier takes the first one's reading of the scene
+            mod.use_cache = not first
+            first = False
+        group = None
+        if self.cam.data.type != "ORTHO" and gp.modifiers:
+            group = self.depth_radius_group()
+            nodes = gp.modifiers.new("md_lineart_width", "NODES")
+            nodes.node_group = group
+        # the shadow catcher hides nothing and has no outline
+        left_out = [o for o in bpy.data.objects if o.type == "MESH" and (o.hide_render or o is self.floor) and o.lineart.usage != "EXCLUDE"]
+        for o in left_out:
+            o.lineart.usage = "EXCLUDE"
+        scn.collection.objects.link(gp)
+        return gp, gpd, group, left_out
+
+    def depth_radius_group(self):
+        """Nodes that multiply every stroke point's radius by its distance in
+        front of the camera. With the radius the modifiers gave, the width of a
+        pixel at one metre, a line is as wide in the picture wherever it lies."""
+        M = self.cam.matrix_world
+        eye = M.translation; forward = -M.to_3x3().col[2]
+        ng = bpy.data.node_groups.new("md_lineart_width", "GeometryNodeTree")
+        ng.interface.new_socket("Geometry", in_out="INPUT", socket_type="NodeSocketGeometry")
+        ng.interface.new_socket("Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
+        n = ng.nodes
+        gin, gout = n.new("NodeGroupInput"), n.new("NodeGroupOutput")
+        pos, rad = n.new("GeometryNodeInputPosition"), n.new("GeometryNodeInputRadius")
+        sub = n.new("ShaderNodeVectorMath"); sub.operation = "SUBTRACT"; sub.inputs[1].default_value = eye
+        dot = n.new("ShaderNodeVectorMath"); dot.operation = "DOT_PRODUCT"; dot.inputs[1].default_value = forward
+        mul = n.new("ShaderNodeMath"); mul.operation = "MULTIPLY"
+        setr = n.new("GeometryNodeSetCurveRadius")
+        k = ng.links
+        k.new(pos.outputs[0], sub.inputs[0]); k.new(sub.outputs[0], dot.inputs[0])
+        k.new(dot.outputs["Value"], mul.inputs[0]); k.new(rad.outputs[0], mul.inputs[1])
+        k.new(gin.outputs[0], setr.inputs[0]); k.new(mul.outputs[0], setr.inputs["Radius"]); k.new(setr.outputs[0], gout.inputs[0])
+        return ng
+
+    def remove_line_art(self, drawn):
+        gp, gpd, group, left_out = drawn
+        for o in left_out:
+            o.lineart.usage = "INHERIT"
+        bpy.data.objects.remove(gp)
+        bpy.data.grease_pencils_v3.remove(gpd)
+        if group is not None:
+            bpy.data.node_groups.remove(group)
 
     def setup_camera(self):
         cd = bpy.data.cameras.new("cam"); cd.clip_start = 0.0005; cd.clip_end = 1000
@@ -556,7 +734,7 @@ class Renderer:
             want = to_blender(self.scene.occurrences[oid].world, self.factor)
             dev = max(abs(a - b) for ra, rb in zip(o.matrix_world, want) for a, b in zip(ra, rb))
             worst = max(worst, dev)
-        ok = exact and worst < 1e-6 and not any(o.name.startswith("md_arrow") for o in bpy.data.objects)
+        ok = exact and worst < 1e-6 and not any(o.name.startswith(("md_arrow", "md_lineart")) for o in bpy.data.objects)
         self.checks["restoration"].append({"after_view": view_id, "world_restored_exactly": exact, "max_pose_deviation_m": worst, "passed": ok})
         if not ok:
             self.checks["problems"].append(f"canonical poses not restored after {view_id} (deviation {worst})")
@@ -587,14 +765,15 @@ class Renderer:
         # a line set over an empty collection logs "strokes set empty"; skip it
         for ls in bpy.context.view_layer.freestyle_settings.linesets:
             ls.show_render = bool(ls.collection and ls.collection.objects)
-        # Freestyle's cost grows superlinearly with the visible edge count: over budget, no lines for this view
+        # Freestyle's cost grows superlinearly with the visible edge count: over its budget it draws nothing,
+        # and the view has no outlines unless Line Art may draw them
         tris = self.visible_triangles()
         budget = self.s["lines"]["preview_max_triangles" if self.preview else "max_triangles"]
-        lines = self.lines_enabled and tris <= budget
-        if self.lines_enabled and not lines:
+        outliner = outliner_for(self.lines_enabled, self.outliner, tris, budget)
+        if self.lines_enabled and outliner is None:
             self.warnings.append(f"{view_id}: {tris} visible triangles exceed lines.max_triangles ({budget}); rendered without line art")
-        scn.render.use_freestyle = lines
-        self.last_view = {"lines": lines, "visible_triangles": tris}
+        scn.render.use_freestyle = outliner == "freestyle"
+        self.last_view = {"lines": outliner is not None, "outliner": outliner, "visible_triangles": tris}
         if self.engine == "CYCLES":
             scn.cycles.samples = samples
         elif self.engine.startswith("BLENDER_EEVEE"):
@@ -602,7 +781,12 @@ class Renderer:
         path = self.out / f"{view_id}.png"
         scn.render.filepath = str(path)
         t0 = time.time()
-        bpy.ops.render.render(write_still=True)
+        drawn = self.add_line_art() if outliner == "line-art" else None
+        try:
+            bpy.ops.render.render(write_still=True)
+        finally:
+            if drawn is not None:
+                self.remove_line_art(drawn)
         return path, time.time() - t0
 
     def hotspots(self, view_id, visible_ids):
@@ -650,7 +834,7 @@ class Renderer:
         rec = {"id": view_id, "file": path.name, "sha256": receipts.sha256_file(path), "bytes": path.stat().st_size,
                "floor_shadow_catcher": bool(self.floor is not None and not self.floor.hide_render),
                "width": self.scn.render.resolution_x, "height": self.scn.render.resolution_y, "seconds": round(secs, 1),
-               "lines": self.last_view.get("lines"), "visible_triangles": self.last_view.get("visible_triangles"),
+               "lines": self.last_view.get("lines"), "outliner": self.last_view.get("outliner"), "visible_triangles": self.last_view.get("visible_triangles"),
                "camera": {"type": self.cam.data.type, "ortho_scale_m": self.cam.data.ortho_scale if self.cam.data.type == "ORTHO" else None,
                           "location_m": list(self.cam.matrix_world.translation)}}
         rec.update(extra)
@@ -846,14 +1030,18 @@ class Renderer:
         self.restore(); self.verify_restored(view_id)
         return rec
 
-    def render_still(self, view_id, stands, up, group=None, size=None):
+    def render_still(self, view_id, stands, up, group=None, size=None, worlds=None):
         """A picture outside a manual: every occurrence, or one subassembly
         alone, at its canonical pose and in its look, seen from where `stands`
         says the camera is (a direction from the middle of what is drawn) with
         `up` upwards in the picture. `size` is (width, height) in pixels, or
-        None for the settings' long side and aspect. Nothing is moved, and the
-        poses are restored and verified afterwards like after every other view."""
+        None for the settings' long side and aspect. With `worlds`, {occurrence
+        id: its world transform in the scene's units} for the occurrences that
+        joints have moved (joints.py), those are drawn there, and the camera
+        frames them there; the rest stay where the scene has them. The poses
+        are restored and verified afterwards like after every other view."""
         self.restore()
+        worlds = worlds or {}
         members = self.group_members(group) if group is not None else list(self.obj_of)
         if not members:
             raise SystemExit(f"--group: assembly {group!r} has no occurrences")
@@ -868,7 +1056,10 @@ class Renderer:
             self.scn.render.resolution_percentage = 100
         pts = []
         for oid in members:
-            pts += self.occurrence_corners(oid)
+            pts += self.occurrence_corners(oid, worlds.get(oid))
+            if oid in worlds:
+                self.obj_of[oid].matrix_world = to_blender(worlds[oid], self.factor)
+        bpy.context.view_layer.update()
         mn, mx = aabb_of(pts); ctr = (mn + mx) / 2
         d = Vector(stands).normalized()
         # the eye sits outside the whole scene, so nothing is cut by the camera plane
@@ -882,22 +1073,33 @@ class Renderer:
             parts[pid] = parts.get(pid, 0) + 1
         rec = self.view_record(view_id, path, secs, kind="still", group_id=group, visible=members,
                                stands=[round(v, 4) for v in d], up=[float(v) for v in up], parts=parts,
-                               poses="canonical", exploded=False, framed=framed, extent_m=[round(v, 4) for v in (mx - mn)],
+                               poses="moved by joints" if any(oid in worlds for oid in members) else "canonical",
+                               exploded=False, framed=framed, extent_m=[round(v, 4) for v in (mx - mn)],
                                note="a picture outside a manual: occurrences at their CAD poses in their looks; "
-                                    "not an assembly step; no sequence, fasteners or tool access implied")
+                                    "not an assembly step; no sequence, fasteners or tool access implied"
+                               if not any(oid in worlds for oid in members) else
+                               "a picture outside a manual: occurrences in their looks, those that joints move where the "
+                               "joints' values put them; an illustration of the record of the joints, and nothing is "
+                               "checked of what the parts meet there")
         self.restore(); self.verify_restored(view_id)
         return rec
 
-    def turn_lights(self, angle=0.0):
+    def turn_lights(self, angle=0.0, pivot=None):
         """Stand the studio's lights where the settings put them, turned by `angle`
-        (radians) about the vertical axis through the scene's centre. A turntable
-        turns them with its camera, so that what the camera sees is lit from the
-        same side all the way round; without an angle they are back where
-        setup_studio put them."""
+        (radians) about the vertical axis through `pivot` (metres), or through
+        the scene's centre. A turntable turns them with its camera, about the
+        axis the camera goes round, so that what the camera sees is lit from the
+        same side all the way round: for a subassembly off to a side that axis
+        is not the scene's, and a light going round another axis than the
+        camera comes nearer and goes away again in the camera's picture.
+        Without an angle the lights are back where setup_studio put them."""
         turn = Matrix.Rotation(angle, 3, "Z")
         for lo, spec in zip(self.lights, self.s["studio"].values()):
             d = turn @ Vector(spec["direction"]).normalized()
             lo.location = self.scene_centre + d * spec["distance"] * self.scene_radius
+            if pivot is not None:
+                rest = self.scene_centre + Vector(spec["direction"]).normalized() * spec["distance"] * self.scene_radius
+                lo.location = Vector(timeline.about_vertical(tuple(rest), tuple(pivot), angle))
             lo.rotation_euler = d.to_track_quat("Z", "Y").to_euler()
         bpy.context.view_layer.update()
 
@@ -913,13 +1115,15 @@ class Renderer:
         self.cam.data.ortho_scale = ortho_scale
         bpy.context.view_layer.update()
 
-    def render_frame(self, view_id, members, offsets_m=None, kind="frame", **extra):
+    def render_frame(self, view_id, members, offsets_m=None, kind="frame", worlds=None, **extra):
         """One frame of a moving picture (motion.py): the occurrences in
         `members` in their looks, each moved from its canonical pose by its
-        entry in `offsets_m` (metres, scene frame) when it has one, seen by the
+        entry in `offsets_m` (metres, scene frame) when it has one, or put
+        where its entry in `worlds` says (its whole world transform, in the
+        scene's units: where a joint has taken it, joints.py), seen by the
         camera as it stands. The resolution and the camera are the caller's.
-        The offsets are illustration transforms only; the poses are restored
-        and verified after the frame like after every other view."""
+        Offsets and poses are illustration transforms only; the canonical poses
+        are restored and verified after the frame like after every other view."""
         self.restore()
         shown = set(members)
         for oid, o in self.obj_of.items():
@@ -929,11 +1133,14 @@ class Renderer:
         for oid, off in (offsets_m or {}).items():
             o = self.obj_of[oid]
             o.location = o.location + Vector(off)
+        for oid, world in (worlds or {}).items():
+            self.obj_of[oid].matrix_world = to_blender(world, self.factor)
         bpy.context.view_layer.update()
         self.place_floor([self.obj_of[oid] for oid in members], kind)
         path, secs = self.render_to(view_id, self.samples())
         rec = {"id": view_id, "file": path.name, "sha256": receipts.sha256_file(path), "bytes": path.stat().st_size,
-               "seconds": round(secs, 1), "lines": self.last_view.get("lines"), "visible_triangles": self.last_view.get("visible_triangles")}
+               "seconds": round(secs, 1), "lines": self.last_view.get("lines"), "outliner": self.last_view.get("outliner"),
+               "visible_triangles": self.last_view.get("visible_triangles")}
         rec.update(extra)
         self.restore(); self.verify_restored(view_id)
         return rec
@@ -1091,7 +1298,7 @@ class Renderer:
         for view_id, fn in self.plan(groups, joints, exploded):
             wanted = not only or view_id in only
             if reuse is not None and view_id in old and not (only and view_id in only):
-                reason = stale_reason(old[view_id], joint_specs, self.lines_enabled, budget, exploded, instructions_changed, step_states, look_states)
+                reason = stale_reason(old[view_id], joint_specs, self.lines_enabled, budget, exploded, instructions_changed, step_states, look_states, self.outliner)
                 if reason is None:
                     rec = self.reuse_view(old[view_id], reuse)
                     views.append(rec)
@@ -1132,6 +1339,7 @@ def main(argv):
         raise SystemExit(__doc__)
     project_dir, meshes_path, out_dir = Path(argv[0]), Path(argv[1]), Path(argv[2])
     preview = False; only = None; engine = None; lines = True; cli_groups = []; reuse_dir = None; i = 3; instructions_changed = False
+    outliner = None
     while i < len(argv):
         if argv[i] == "--preview":
             preview = True; i += 1
@@ -1145,8 +1353,12 @@ def main(argv):
             reuse_dir = Path(argv[i + 1]); i += 2
         elif argv[i] == "--engine":
             engine = argv[i + 1]; i += 2
+        elif argv[i] == "--outliner" and i + 1 < len(argv):
+            outliner = argv[i + 1]; i += 2
         else:
             raise SystemExit(f"unknown argument {argv[i]}")
+    if outliner is not None and outliner not in OUTLINERS:
+        raise SystemExit(f"--outliner: one of {', '.join(OUTLINERS)}, not {outliner!r}")
     try:
         project = load_project(project_dir)
     except ManifestError as e:
@@ -1198,14 +1410,14 @@ def main(argv):
         reuse = {"dir": str(reuse_dir), "receipt_path": str(rp), "views": old["views"], "settings_sha256": old.get("settings_sha256"),
                  "generated_at_utc": old.get("generated_at_utc"), "blender": old.get("blender"), "part_looks": old.get("part_looks")}
     t0 = time.time()
-    r = Renderer(project, meshes, settings, out_dir, preview, engine, lines)
+    r = Renderer(project, meshes, settings, out_dir, preview, engine, lines, outliner)
     views, missing = r.run(only, groups, reuse, joints, exploded, instructions_changed if reuse else False)
     reused = [v["id"] for v in views if v.get("reused_from")]
     receipt = {
         "kind": "mechanical-docs-render-receipt", "generated_at_utc": receipts.utc_now(),
         "blender": bpy.app.version_string, "python": sys.version.split()[0], "engine": r.engine, "denoiser": r.denoiser,
         "preview": preview, "samples": r.samples(), "long_side_px": r.long_side(), "floor_shadow_catcher": r.floor is not None,
-        "lines": r.lines_enabled, "lines_max_triangles": settings["lines"]["preview_max_triangles" if preview else "max_triangles"],
+        "lines": r.lines_enabled, "outliner": r.outliner, "lines_max_triangles": settings["lines"]["preview_max_triangles" if preview else "max_triangles"],
         "settings_file": str(settings_path.relative_to(project.dir)) if settings_path else None,
         "settings_sha256": receipts.sha256_text(json.dumps(settings, sort_keys=True)),
         "project_dir": str(project.dir), "scene_id": project.scene.id, "scene_units": project.scene.units, "unit_factor_to_m": r.factor,

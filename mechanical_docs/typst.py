@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 
+from .render_settings import outline_words
+
 
 def raw(s):
     """An identifier set verbatim as inline raw text: `#raw("…")` with the string
@@ -275,7 +277,7 @@ def render(model):
         m = r["meshes"]; t = m.get("tessellation") or {}
         w(f"  [FreeCAD], [{esc(str(m['freecad_version']))}; deflection {t.get('linear_deflection')} mm / {t.get('angular_deflection_deg')}°, budget {t.get('max_triangles_per_part')} triangles per part; meshes.json {raw(str(m.get('sha256')))}],")
     w(f"  [Blender], [{esc(str(rr.get('blender')))}, engine {esc(str(rr.get('engine')))}, denoiser {esc(str(rr.get('denoiser')))}, samples {rr.get('samples')}, long side {rr.get('long_side_px')} px"
-      f"{', preview quality' if rr.get('preview') else ''}; line art {'on' if rr.get('lines') else 'off'} up to {rr.get('lines_max_triangles')} visible triangles; settings {raw(str(rr.get('settings_sha256')))}],")
+      f"{', preview quality' if rr.get('preview') else ''}; {outline_words(rr.get('lines'), rr.get('outliner'), rr.get('lines_max_triangles'))}; settings {raw(str(rr.get('settings_sha256')))}],")
     if rr.get("reused_views"):
         w(f"  [reused views], [{len(rr['reused_views'])} of {len(r['render_views'])} images copied from an earlier run with the same inputs, meshes and engine ({esc(str(rr.get('reused_from')))}); per-view record in manual.json],")
     for wmsg in rr.get("warnings") or []:

@@ -18,8 +18,8 @@ their measurements and evidence runs, are in .agents/HISTORY.md.
   of a scene outside a manual. README.md lists the commands and
   docs/next-agent.md the modules.
 - Three synthetic fixtures build end to end; all three were built on
-  2026-11-19 at preview quality with the Guix Blender, and all their checks
-  passed.
+  2026-11-19 at preview quality with the Guix Blender, the last time when
+  that day's work ended, and all their checks passed.
 - **The enclosure.** Its published manual is the draft phase-1 package of
   2026-10-23 (compact PDF 59 pages, appendix 77 pages, 33 checks passed
   each), published by the enclosure project; nothing of it is tracked here.
@@ -38,78 +38,67 @@ their measurements and evidence runs, are in .agents/HISTORY.md.
   views, with outlines, about 11 minutes each), a PDF of 59 pages as the
   published one has, and all 32 checks passed; the viewer stage was not
   run. It is in the project's ignored `.cache/manual-preview-2026-11-19/`.
-- **Finishes (2026-11-19).** Peter decided that day that what a picture draws
-  each part with is one hand-edited file for the whole project
-  (`finishes.toml`, in `mechanical-cad`'s layout). `mechanical-cad`'s flatten
-  step derives `finishes.json` from it beside `scene.json`, and this
-  pipeline reads that file: a part is drawn in the look `render.json` names
-  for it, else in its finish, else in the default look (`looks.py`). A
-  finish is a colour written in sRGB, how metallic, how rough and how
-  opaque; a translucent part shows what lies behind it. The file is a render
-  input and no geometry input. The render receipt records what every part
-  was drawn with, and `--reuse` judges every view by the parts it shows in
-  their own looks, so a changed finish, or a changed `looks` entry, renders
-  only those views again. On the two-bases fixture, 11 views: a changed
-  finish of the base rendered 5 and copied 6; a changed finish of the pin,
-  which `render.json` overrides, rendered none. docs/input-contract.md,
-  "Finishes", is the contract.
-- **A picture outside a manual (2026-11-19).** `mechanical_docs/still.py`
-  draws a scene alone, or one subassembly of it, from a named side, with no
-  inventory and no instructions; the CAD stage meshes such a directory. The
-  view names are those of `mechanical-cad`'s `tools/picture.py`. It has its
-  own exposure (`still_exposure`, -2.5 stops): the studio of the render
-  stage lights a face that looks up about seven times as brightly as its
-  colour, so that at exposure 0 a mid-grey finish is white on top. A
-  manual's own views keep exposure 0.
-- **Motion (2026-11-19), stage 7.2 of `mechanical-cad`'s plan.**
-  `mechanical_docs/motion.py` draws three sequences from the directory a
-  still is made from and writes each as frames, a video and a receipt: a
-  turntable of the scene or of one subassembly, at one scale for the whole
-  turn and with the lights turning with the camera; the top-level groups
-  moving apart to the offsets of the exploded view, and back; and, for a
-  project with instructions, the steps in the manual's order, what each
-  adds arriving at its seat. Blender's own FFmpeg writes the video on both
-  routes (H.264, or VP9 with `--webm`), and the file is read back and held
-  to its frame count. Outlines and the floor are off in frames unless asked
-  for. What needs no Blender is in `timeline.py`, with tests. On the
-  enclosure, Cycles at preview quality, 960 x 720: a turntable of one tank
-  support frame (72 frames, 296 s), of the whole enclosure (72 frames,
-  176 s) and the exploded sequence there and back (95 frames, 275 s); with
-  EEVEE the whole enclosure takes 0.7 s a frame. And the steps of the
-  enclosure's staged project, its eighteen draft steps in their order: 468
-  frames, 19.5 s of video, in 129 s with EEVEE in the Guix Blender; the
-  frame, the camera frame, the panels and the top arrive in that order. A
-  joint moved through its range is not built: the layout has no record for
-  joints. Not run: a video at full quality, and a steps sequence with a
-  perspective view.
-- **Smaller, the same day.** The CAD stage takes its own options after a
-  bare `--` (`--pass PROJECT OUT -- --max-triangles 20000`), which
-  FreeCADCmd 1.1.3 otherwise takes for its own. The manual's viewer models
-  give a part the look that was chosen for it, in `render.json` or in
-  `finishes.json`, as a glTF material named after it; a project that chose
-  nothing gets the same bytes as before. Nobody has looked at such a model
-  in a browser.
-- **Outlines on whole assemblies, measured and not built** (2026-11-19).
-  Grease Pencil Line Art runs without a window in both Blenders and draws
-  the whole enclosure, 2.44 million triangles, in under a minute where
-  Freestyle took 32 minutes; drawn in front, it reads like a Freestyle
-  picture. Left open before it can stand in: some edges of the thin-walled
-  tank come out broken, two widths for subject and context, perspective
-  views, and what `--reuse` makes of a view that gains lines. The modifier
-  must be added only for the render call, or it is worked out again at
-  every scene update. docs/environment.md has the measurements.
-- Run on 2026-11-19: the pure-Python suite, 168 passed and 4 skipped; with
-  FreeCAD, 172 passed. Rendered that day with Cycles and with EEVEE: stills
-  of the two-bases fixture and of a scratch scene. And of the enclosure,
-  from its scene flattened by `mechanical-cad` with the project's draft
-  finishes into a scratch directory and meshed there (37 parts, every check
-  passed), with Cycles at preview quality, 1200 x 900: the whole enclosure,
-  155 occurrences, in 10 s without outlines (2.4 million visible triangles
-  are over the preview budget for them), and one tank support frame alone,
-  its clear tank and platform seen through, with outlines, in 225 s. Not
-  run: `viewer.py` (only a message changed in it), a manual with Cycles, a
-  manual of a project that has finishes other than the fixture, a
-  full-quality render of anything but stills of a fixture.
+- **Since 2026-11-19, stage 7 of `mechanical-cad`'s plan** (the record of how
+  each came about, with its measurements, is in .agents/HISTORY.md, "The
+  record of 2026-11-19"):
+  - *Finishes.* A part is drawn in the look `render.json` names for it, else
+    in its finish of `finishes.json` (derived by `mechanical-cad` from the
+    project's one `finishes.toml`, Peter's decision of that day), else in
+    the default look. The receipt records the look of every part and
+    `--reuse` judges each view by the parts it shows. The manual's viewer
+    models carry the looks as glTF materials. docs/input-contract.md,
+    "Finishes".
+  - *Pictures outside a manual.* `still.py` draws a scene alone, or one
+    subassembly, from a named side or a given direction, with `--up` where
+    Z is not to be up in the picture, at an exposure of its own
+    (`still_exposure`, -2.5 stops) that shows colours; a manual's views keep
+    exposure 0.
+  - *Moving pictures.* `motion.py` writes frames, a video (Blender's own
+    FFmpeg) and a receipt for a turntable, an exploded sequence, a project's
+    steps, a joint through its range and one pose going over into another.
+    What needs no Blender is in `timeline.py` and `joints.py`.
+  - *Joints and poses, against a draft.* `mechanical-cad` has a record of a
+    project's joints and poses that Peter has not decided, and derives
+    `motion.json` beside `scene.json` from it. `joints.py` reads it:
+    a turn about a line or a slide along one, joints carrying joints, a
+    joint that follows another at a ratio. `motion.py joint NAME` and
+    `pose FROM TO` draw it, of the whole scene or of one subassembly
+    (`--group`), and `still.py --pose NAME` or `--at JOINT=VALUE,...` draws
+    one position. Nothing else reads the file. Drawn on the fixture with a
+    file written by hand and on one real assembly (below).
+    docs/input-contract.md, "Joints and poses", is the contract as built.
+  - *Line Art.* `lines.outliner` in `render.json`, or `--outliner` of
+    `render.py`, `still.py` and `motion.py`, says what draws outlines:
+    `freestyle` (the default, as before), `line-art`, or `mixed` (Freestyle
+    within its budget, Line Art above it). No project sets it.
+    docs/environment.md has what was found and measured.
+  - *A part that is surfaces.* The CAD stage calls a part without a solid a
+    problem, as before, unless `--surface-parts` names it; it is then
+    meshed from its faces and recorded as a surface model whose volume is
+    not checked.
+- **The mechanical example, the first real joints drawn here** (2026-11-19).
+  `mechanical-cad`'s project made of one STEP file of an assembly, 37 parts
+  and 108 occurrences, flattened with its finishes and with a `motion.json`
+  of five joints from that repository's draft record. Its switch is a
+  supplier's model of surfaces, so its meshes are made with
+  `--surface-parts d2f-01fl`. Drawn with EEVEE in the Guix Blender at
+  1280 x 720, with Line Art's outlines: the lever of the first unit through
+  its range, that unit alone, the lever's gear and the motor's turning
+  against each other and the rod staying on its shaft (95 frames, 238 s);
+  the first unit turning on the base plate through its arc slot, seen from
+  above, the knob's screw staying in the slot from one end to the other (95
+  frames, 346 s); the lever from its stop to its other pose and back; and a
+  still with both units at the ends of their slots (4.6 s; 20.8 s with
+  Freestyle). Every receipt's checks passed. The videos, the still and
+  their receipts are in that project's ignored `.cache/pictures/poses/`, in
+  `mechanical-cad`'s checkout. Not run on it: Cycles.
+- Run on 2026-11-19 at the end of the day: the pure-Python suite, 221 passed
+  and 6 skipped; with FreeCAD, 227 passed; the three fixtures' manuals at
+  preview quality with the Guix Blender, every check passed. Not run with
+  the code as it stood then: `viewer.py`, a manual with Cycles, a whole
+  manual with Line Art, a manual of a project that has finishes other than
+  the fixture, and a full-quality render of anything but stills of a
+  fixture and four views of the enclosure.
 
 ## Next work
 
@@ -134,11 +123,27 @@ their measurements and evidence runs, are in .agents/HISTORY.md.
    -1.5 the colours read and the pages stay light; at -2.5 the colours are
    nearest their finishes and the pictures are heavy. A thin framing
    extrusion is dark at every setting: its outlines fill it.
-4. A joint moved through its range, as video: it waits for joints and poses
-   as records in the layout, which is Peter's word in `mechanical-cad`.
-5. Outlines on whole assemblies with Line Art, if the four points left open
-   above are worth settling: the published manual's overview and most of
-   its steps have no outlines today.
+4. A joint moved through its range as video, one pose into another, and a
+   still at a pose are built against a draft (above). Left: Peter's word on
+   the record of joints in `mechanical-cad`, after which `motion.json` is
+   part of the contract and not a draft. Two things the real example
+   showed. A scene is drawn in the frame it declares: the example's
+   assembly declares none, so it is taken as Z up though the thing stands
+   Y up, and every picture of it needs `--up`; whether a project made of
+   one STEP file says its up axis is `mechanical-cad`'s to settle. And what
+   moves is often behind what does not: the lever's gears face the other
+   unit, so its videos draw one unit alone (`--group`).
+5. Whether the enclosure's manual gets its outlines from Line Art where
+   Freestyle draws none (`"lines": {"outliner": "mixed"}` in the project's
+   `render.json`): Peter's to say, from the sheet named above. Its
+   overview, its exploded view and the steps above the budget have no
+   outlines today. What Line Art leaves as Freestyle does: on the whole
+   enclosure the framing's many edges run together into dark bands; and a
+   step whose additions lie behind what is already installed (the tank
+   support frames, steps 16 to 18) gets no outline on them, since the
+   ghosted parts hide edges as opaque ones do. Line Art's material masks
+   could draw such edges through the ghosts; not tried. Not run with Line
+   Art: a whole manual of the enclosure, and the viewer stage.
 
 ## Open items
 
@@ -171,8 +176,9 @@ Carried from earlier checkpoints:
 - Instruction model: close-up views, per-step view overrides, moves and
   removals, tools, checkpoints.
 - Line art on full-assembly views. Freestyle is off above the line budget, so
-  the overview and the exploded view have no outlines. Grease Pencil Line Art
-  was measured on 2026-11-19 ("Current state"); not built in.
+  the overview and the exploded view have no outlines unless a project hands
+  them to Line Art, which is built behind a setting since 2026-11-19 ("Next
+  work", 5).
 - The viewer GLBs were checked structurally; no record says anyone has looked
   at them in a browser. No browser print test has been run.
 - A technician's review of printed pages, and the physical-validation record

@@ -11,7 +11,9 @@ stands:
 
 Z points up in the picture, except straight along Z, where the picture is a
 plan: from above X runs to the right and Y upwards, and from below Y is still
-upwards. Nothing here needs Blender.
+upwards. `--up` names another axis for the top of the picture: a scene whose
+declared up axis is not the way the thing stands, or a long thing that should
+lie across the picture, is turned with it. Nothing here needs Blender.
 """
 from __future__ import annotations
 
@@ -46,6 +48,32 @@ def direction(text):
     if len(d) != 3 or not any(d):
         raise ViewError(f"--direction: expected three numbers X,Y,Z that are not all zero, got {text!r}")
     return d, (Y_UP if d[0] == 0.0 and d[1] == 0.0 else Z_UP)
+
+
+def up(text):
+    """`--up`: which way is up in the picture, as an axis (`+y`, `-x`) or as `X,Y,Z`."""
+    key = str(text).lower()
+    if key in AXES:
+        return AXES[key]
+    try:
+        d = tuple(float(v) for v in str(text).split(","))
+    except ValueError:
+        d = ()
+    if len(d) != 3 or not any(d):
+        raise ViewError(f"--up: expected an axis ({', '.join(AXES)}) or three numbers X,Y,Z that are not all zero, got {text!r}")
+    return d
+
+
+def turned(view, up_vector):
+    """A view (where the camera stands, which way is up) with another way up. The camera cannot look along
+    the way that is to be up in its picture."""
+    stands_at, _ = view
+    cross = (stands_at[1] * up_vector[2] - stands_at[2] * up_vector[1], stands_at[2] * up_vector[0] - stands_at[0] * up_vector[2],
+             stands_at[0] * up_vector[1] - stands_at[1] * up_vector[0])
+    size = (sum(c * c for c in stands_at) * sum(c * c for c in up_vector)) ** 0.5
+    if sum(c * c for c in cross) ** 0.5 < 1e-6 * size:
+        raise ViewError(f"--up: a camera that stands along {tuple(stands_at)} looks along {tuple(up_vector)}, which cannot be up in its picture")
+    return stands_at, tuple(float(c) for c in up_vector)
 
 
 def file_name(view):

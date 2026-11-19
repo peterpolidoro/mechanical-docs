@@ -6,6 +6,10 @@ that read as open were finished later, as the later checkpoints say. Commit ids
 and "uncommitted" notes describe the day they were written. The current plan is
 .agents/PLANS.md.
 
+After it, at the end of this file: the record of 2026-11-19 (finishes, pictures
+outside a manual, moving pictures, joints, Line Art), moved here unchanged when
+that day's work ended.
+
 ---
 
 ## The plan as of 2026-11-10
@@ -534,3 +538,131 @@ in one workspace can fail, so the second renderer was started through the
 environment's Python directly. Evidence and the mailbox reply are under the
 shared coordination area named in the ignored local handoff. No commits, pushes
 or publication were made.
+
+---
+
+## The record of 2026-11-19, moved here when that day's work ended
+
+The entries of the plan's "Current state" for that day, as they stood before
+the day's last round (which built what several of them call open: a pose for
+`still.py`, the posed frame in the renderer, `--outliner` for `motion.py`, a
+real project's joints drawn). The plan has what is true now.
+
+- **Finishes (2026-11-19).** Peter decided that day that what a picture draws
+  each part with is one hand-edited file for the whole project
+  (`finishes.toml`, in `mechanical-cad`'s layout). `mechanical-cad`'s flatten
+  step derives `finishes.json` from it beside `scene.json`, and this
+  pipeline reads that file: a part is drawn in the look `render.json` names
+  for it, else in its finish, else in the default look (`looks.py`). A
+  finish is a colour written in sRGB, how metallic, how rough and how
+  opaque; a translucent part shows what lies behind it. The file is a render
+  input and no geometry input. The render receipt records what every part
+  was drawn with, and `--reuse` judges every view by the parts it shows in
+  their own looks, so a changed finish, or a changed `looks` entry, renders
+  only those views again. On the two-bases fixture, 11 views: a changed
+  finish of the base rendered 5 and copied 6; a changed finish of the pin,
+  which `render.json` overrides, rendered none. docs/input-contract.md,
+  "Finishes", is the contract.
+- **A picture outside a manual (2026-11-19).** `mechanical_docs/still.py`
+  draws a scene alone, or one subassembly of it, from a named side, with no
+  inventory and no instructions; the CAD stage meshes such a directory. The
+  view names are those of `mechanical-cad`'s `tools/picture.py`. It has its
+  own exposure (`still_exposure`, -2.5 stops): the studio of the render
+  stage lights a face that looks up about seven times as brightly as its
+  colour, so that at exposure 0 a mid-grey finish is white on top. A
+  manual's own views keep exposure 0.
+- **Motion (2026-11-19), stage 7.2 of `mechanical-cad`'s plan.**
+  `mechanical_docs/motion.py` draws three sequences from the directory a
+  still is made from and writes each as frames, a video and a receipt: a
+  turntable of the scene or of one subassembly, at one scale for the whole
+  turn and with the lights turning with the camera; the top-level groups
+  moving apart to the offsets of the exploded view, and back; and, for a
+  project with instructions, the steps in the manual's order, what each
+  adds arriving at its seat. Blender's own FFmpeg writes the video on both
+  routes (H.264, or VP9 with `--webm`), and the file is read back and held
+  to its frame count. Outlines and the floor are off in frames unless asked
+  for. What needs no Blender is in `timeline.py`, with tests. On the
+  enclosure, Cycles at preview quality, 960 x 720: a turntable of one tank
+  support frame (72 frames, 296 s), of the whole enclosure (72 frames,
+  176 s) and the exploded sequence there and back (95 frames, 275 s); with
+  EEVEE the whole enclosure takes 0.7 s a frame. And the steps of the
+  enclosure's staged project, its eighteen draft steps in their order: 468
+  frames, 19.5 s of video, in 129 s with EEVEE in the Guix Blender; the
+  frame, the camera frame, the panels and the top arrive in that order.
+  Not run: a video at full quality, and a steps sequence with a
+  perspective view.
+- **A joint through its range, and one pose into another (2026-11-19,
+  later; a draft).** `mechanical-cad` has a record of a project's joints
+  and poses as a draft that Peter has not decided, and derives
+  `motion.json` from it beside `scene.json`. `mechanical_docs/joints.py`
+  reads that file against the scene and says where a joint puts what it
+  moves: a turn about a line or a slide along it, a joint further out
+  carrying the joints further in, and a joint that follows another (a
+  gear) always at its ratio times where that one is.
+  `motion.py joint NAME` takes a joint from its lower limit to its upper
+  one and back, with what follows it; `pose FROM TO` takes every joint
+  from one named pose to another. The camera stands still and frames what
+  the motion sweeps; the receipt pins `motion.json` by its hash and
+  records every joint's value at each frame. Nothing else reads the file:
+  a scene with one hashes, meshes and renders as before.
+  docs/input-contract.md, "Joints and poses", is the contract as built.
+  Drawn on the three-part fixture with a file written by hand (two joints
+  in a chain and one that follows, EEVEE in the Guix Blender, 29 frames in
+  under 3 s, poses restored exactly after every frame); no real project's
+  joints have been drawn here. `still.py` takes no pose yet.
+- **Found reading the motion code line by line (2026-11-19, later).** A
+  turntable of a subassembly that stands off the vertical through the
+  scene's middle had its lights going round another axis than its camera
+  (on a scratch scene the key light came nearer and went away again by a
+  factor of two in brightness); they now go round the camera's axis, and
+  the receipt holds how far a light strays in the camera's frame. An
+  exploded sequence that comes back with no frames at rest ended on its
+  first frame; it now goes all the way home. A video of an earlier run
+  under the same name stayed beside a receipt that did not describe it.
+  The mesh stage called with a bare `--` and no output directory failed
+  on an index.
+- **Smaller, the same day.** The CAD stage takes its own options after a
+  bare `--` (`--pass PROJECT OUT -- --max-triangles 20000`), which
+  FreeCADCmd 1.1.3 otherwise takes for its own. The manual's viewer models
+  give a part the look that was chosen for it, in `render.json` or in
+  `finishes.json`, as a glTF material named after it; a project that chose
+  nothing gets the same bytes as before. Nobody has looked at such a model
+  in a browser.
+- **Outlines on whole assemblies with Line Art, built behind a setting**
+  (2026-11-19). `lines.outliner` in `render.json`, or `--outliner` of
+  `render.py` and `still.py`, says what draws a view's outlines:
+  `freestyle`, the default, as before, so that a project that says nothing
+  gets the pictures it had; `line-art`, Grease Pencil Line Art for every
+  view; `mixed`, Freestyle within its triangle budget and Line Art above
+  it. The four points left open that morning are settled. The tank's broken
+  edges were strokes without anti-aliasing, meshes whose faces were not
+  joined, and lines on every edge marked sharp; a step's additions and its
+  context have their two widths and colours; a width holds in a perspective
+  picture; and a view's record names its outliner, by which `--reuse`
+  renders again a view the other one drew. docs/environment.md has each
+  with its evidence. On the enclosure's staged project at full quality,
+  1600 x 1200, on a machine busy with other work: the overview, 2.44
+  million triangles, in 13.7 s with EEVEE (1.6 s without outlines) and
+  109 s with Cycles (108 s without); step 8 in perspective, 1.18 million,
+  in 12.7 s and 27.7 s. Four views without outlines and with Line Art are
+  on one sheet in the project's ignored
+  `.cache/pictures/line-art-comparison.png`, seven other kinds of view in
+  `line-art-other-views-eevee.png` beside it. Run with it: the two-bases
+  fixture's manual (built, every check passed; its technical page says
+  what drew the outlines), the reuse cases between the outliners on that
+  fixture, six turntable frames through `motion.py`, which follows the
+  setting. With the default the fixture's pictures are what the committed
+  code draws. Not run: a whole manual of the enclosure with Line Art, and
+  the viewer stage. No project's `render.json` sets it.
+- Run on 2026-11-19: the pure-Python suite, 168 passed and 4 skipped; with
+  FreeCAD, 172 passed. Rendered that day with Cycles and with EEVEE: stills
+  of the two-bases fixture and of a scratch scene. And of the enclosure,
+  from its scene flattened by `mechanical-cad` with the project's draft
+  finishes into a scratch directory and meshed there (37 parts, every check
+  passed), with Cycles at preview quality, 1200 x 900: the whole enclosure,
+  155 occurrences, in 10 s without outlines (2.4 million visible triangles
+  are over the preview budget for them), and one tank support frame alone,
+  its clear tank and platform seen through, with outlines, in 225 s. Not
+  run: `viewer.py` (only a message changed in it), a manual with Cycles, a
+  manual of a project that has finishes other than the fixture, a
+  full-quality render of anything but stills of a fixture.

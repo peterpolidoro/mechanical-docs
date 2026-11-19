@@ -19,6 +19,7 @@ import json
 from pathlib import Path
 
 from .names import slug
+from .render_settings import outline_words
 
 CSS = """
 :root { --ink: #111; --muted: #555; --line: #999; --accent: #d9480f; --card: #fff; --bg: #f4f4f5; }
@@ -400,7 +401,7 @@ def render(model, out_dir, embed_images=False):
         m = r["meshes"]; t = m.get("tessellation") or {}
         o.append(f"<dt>FreeCAD</dt><dd>{e(str(m['freecad_version']))}; deflection {t.get('linear_deflection')} mm / {t.get('angular_deflection_deg')}°, budget {t.get('max_triangles_per_part')} triangles per part; meshes.json {e(str(m.get('sha256')))}</dd>")
     o.append(f"<dt>Blender</dt><dd>{e(str(rr.get('blender')))}, engine {e(str(rr.get('engine')))}, denoiser {e(str(rr.get('denoiser')))}, samples {rr.get('samples')}, long side {rr.get('long_side_px')} px"
-             f"{', preview quality' if rr.get('preview') else ''}; line art {'on' if rr.get('lines') else 'off'} up to {rr.get('lines_max_triangles')} visible triangles; settings {e(str(rr.get('settings_sha256')))}</dd>")
+             f"{', preview quality' if rr.get('preview') else ''}; {outline_words(rr.get('lines'), rr.get('outliner'), rr.get('lines_max_triangles'))}; settings {e(str(rr.get('settings_sha256')))}</dd>")
     if rr.get("reused_views"):
         o.append(f"<dt>reused views</dt><dd>{len(rr['reused_views'])} of {len(r['render_views'])} images copied from {e(str(rr.get('reused_from')))} (same inputs, meshes and engine); per-view record in manual.json</dd>")
     for w in rr.get("warnings") or []:

@@ -130,3 +130,71 @@ def test_an_approach_offset_is_in_the_scene_s_units():
     ap = hinted[0].step.approach
     assert project.scene.units == "cm"
     assert starts[ap.occurrence_id] == ([10.0 * v for v in ap.start_offset], "approach")
+
+
+def test_a_sequence_that_comes_back_closes_whatever_its_rest():
+    """With no frames at rest the first frame is already one step out, so the way back goes all the way home:
+    the last frame is never the first again, which a player that repeats the sequence would show twice."""
+    s = timeline.smooth
+    back = timeline.exploded_fractions(4, 0, back=True)
+    assert back == [s(0.25), 0.5, s(0.75), 1.0, s(0.75), 0.5, s(0.25), 0.0]
+    for hold in (0, 1, 3):
+        for move in (1, 2, 5):
+            out = timeline.exploded_fractions(move, hold, back=True)
+            assert out[-1] != out[0], (move, hold)
+            # one step from the last frame to the first, as between any two frames of the movement
+            cycle = out + out[:1]
+            assert max(abs(b - a) for a, b in zip(cycle, cycle[1:])) <= max(s(k / move) - s((k - 1) / move) for k in range(1, move + 1)) + 1e-12
+
+
+def test_a_point_goes_round_the_vertical_axis_through_another():
+    quarter = math.pi / 2
+    assert timeline.about_vertical((3.0, 0.0, 5.0), (1.0, 0.0, -2.0), quarter) == pytest.approx((1.0, 2.0, 5.0))
+    assert timeline.about_vertical((3.0, 0.0, 5.0), (1.0, 0.0, 9.0), 0.0) == (3.0, 0.0, 5.0)
+    # a light that goes round the axis the camera goes round stays where it was in the camera's picture: to the
+    # same side, at the same height, as far behind it. Round another axis it does not.
+    pivot, light = (4.0, -1.0, 0.5), (9.0, 6.0, 3.0)
+    def seen(axis_through):
+        out = []
+        for turned, stands in timeline.turntable(8, elevation_deg=20.0, start_deg=10.0):
+            right, up = timeline.camera_axes(stands)
+            at = timeline.about_vertical(light, axis_through, turned)
+            off = [a - p for a, p in zip(at, pivot)]
+            out.append((sum(o * r for o, r in zip(off, right)), sum(o * u for o, u in zip(off, up)), sum(o * c for o, c in zip(off, stands))))
+        return out
+    with_camera = seen(pivot)
+    assert all(frame == pytest.approx(with_camera[0]) for frame in with_camera)
+    elsewhere = seen((0.0, 0.0, 0.0))
+    assert not all(frame == pytest.approx(elsewhere[0], abs=1e-3) for frame in elsewhere)
+    # an axis straight above or below the pivot is the same axis
+    assert all(frame == pytest.approx(want) for frame, want in zip(seen((4.0, -1.0, 7.0)), with_camera))
+
+
+def test_a_joint_goes_through_its_range_and_back():
+    s = timeline.smooth
+    out = timeline.joint_values(-20.0, 40.0, 4, 1)
+    assert out == [-20.0, -20.0 + 60.0 * s(0.25), 10.0, -20.0 + 60.0 * s(0.75), 40.0, 40.0, -20.0 + 60.0 * s(0.75), 10.0, -20.0 + 60.0 * s(0.25)]
+    assert min(out) == -20.0 and max(out) == 40.0                 # the limits themselves are drawn, and nothing beyond
+    assert timeline.joint_values(0.0, 12.0, 2, 0) == [6.0, 12.0, 6.0, 0.0]
+    with pytest.raises(timeline.TimelineError, match="frames"):
+        timeline.joint_values(0.0, 1.0, 0, 1)
+    with pytest.raises(timeline.TimelineError, match="range"):
+        timeline.joint_values(5.0, 5.0, 4, 1)
+
+
+def test_one_pose_goes_over_into_another_every_joint_in_step():
+    s = timeline.smooth
+    a, b = {"lever": -20.0, "slide": 0.0}, {"lever": 30.0, "slide": 12.0}
+    out = timeline.pose_values(a, b, 2, 1)
+    assert out == [a, {"lever": 5.0, "slide": 6.0}, b, b]
+    # every joint has come the same share of its way at every frame: the movement is a straight line between the poses
+    frames = timeline.pose_values(a, b, 5, 0)
+    for frame in frames:
+        assert (frame["lever"] + 20.0) / 50.0 == pytest.approx(frame["slide"] / 12.0)
+    assert frames[-1] == b and frames[0]["slide"] == pytest.approx(12.0 * s(0.2))
+    back = timeline.pose_values(a, b, 2, 1, back=True)
+    assert back == [a, {"lever": 5.0, "slide": 6.0}, b, b, {"lever": 5.0, "slide": 6.0}]
+    with pytest.raises(timeline.TimelineError, match="same joints"):
+        timeline.pose_values(a, {"lever": 30.0}, 2, 1)
+    with pytest.raises(timeline.TimelineError, match="nothing moves"):
+        timeline.pose_values(a, dict(a), 2, 1)
