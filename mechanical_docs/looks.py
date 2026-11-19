@@ -91,3 +91,42 @@ def resolve(part_ids, settings, finishes=None):
 def material_key(look):
     """What tells two materials apart: a palette entry and a finish may share a name."""
     return ("finish:" if look["source"] == "finishes.json" else "look:") + look["look"]
+
+
+def chosen(resolved):
+    """Whether any part's look was chosen for it, in render.json or in finishes.json, and is not just the default."""
+    return any(look["source"] != "default" for look in resolved.values())
+
+
+def gltf_material(look):
+    """A resolved look as a glTF material: the colour as light adds up with the opacity as its alpha, how
+    metallic and how rough, named after the look, blended where it lets through what lies behind. A palette
+    entry's coat is not carried: glTF has it only as an extension."""
+    material = {"name": look["look"],
+                "pbrMetallicRoughness": {"baseColorFactor": [*look["base"], look["opacity"]], "metallicFactor": look["metallic"],
+                                         "roughnessFactor": look["roughness"]},
+                "doubleSided": True, "extras": {"source": look["source"]}}
+    if look["opacity"] < 1.0:
+        material["alphaMode"] = "BLEND"
+    return material
+
+
+def viewer_materials(resolved, flat):
+    """The materials of a viewer model and which of them each part has: ([materials], {part id: index}).
+
+    `flat` is the viewer's own material and always the first. A part whose look was chosen for it, in
+    render.json or in finishes.json, gets that look as a material of its own, one for every look whatever the
+    number of parts that have it; a part in the default look keeps the flat one, as every part has it in a
+    project that chose nothing.
+    """
+    materials, index, of = [flat], {}, {}
+    for pid, look in resolved.items():
+        if look["source"] == "default":
+            of[pid] = 0
+            continue
+        key = material_key(look)
+        if key not in index:
+            index[key] = len(materials)
+            materials.append(gltf_material(look))
+        of[pid] = index[key]
+    return materials, of

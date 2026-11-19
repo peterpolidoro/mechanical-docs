@@ -1,9 +1,14 @@
 """CAD stage, run inside FreeCADCmd: STEP parts -> render meshes with identity preserved.
 
-    FreeCADCmd mechanical_docs/cad_mesh.py --pass PROJECT_DIR OUT_DIR [--linear-deflection MM] [--angular-deflection DEG] [--max-triangles N]
+    FreeCADCmd mechanical_docs/cad_mesh.py --pass PROJECT_DIR OUT_DIR [-- --linear-deflection MM] [-- --angular-deflection DEG] [-- --max-triangles N]
 
 PROJECT_DIR is a project (scene, inventory and the rest) or a directory that
 holds a scene alone, as mechanical-cad's flatten step writes one.
+
+FreeCADCmd reads dashed options itself, even after --pass, and stops at one it
+does not know; put a bare `--` before this script's own options
+(`--pass PROJECT_DIR OUT_DIR -- --max-triangles 20000`). Run by plain python
+they need none.
 
 For every part of the validated scene: read its STEP, check it is a valid
 closed solid, measure its bounds and volume, tessellate it face by face
@@ -233,6 +238,7 @@ def mesh_part(part, out_dir, linear_deflection, angular_deflection_deg, max_tria
 def main(argv):
     if len(argv) < 2:
         raise SystemExit(__doc__)
+    argv = [a for a in argv if a != "--"]     # the bare `--` that keeps FreeCADCmd from reading this script's options
     project_dir, out_dir = Path(argv[0]), Path(argv[1])
     linear = 0.05; angular = 10.0; max_triangles = 50000
     i = 2

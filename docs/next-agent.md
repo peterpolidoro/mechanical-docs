@@ -39,11 +39,30 @@ sibling repository before planning anything here. In short:
   scene alone from a named side (`still.py`, `views.py`; the CAD stage meshes
   a directory without an inventory). Shown on `examples/two-bases-fixture`,
   whose base is translucent. docs/input-contract.md, "Finishes", has the
-  contract and what the high-key studio does to a finish's colour. Not done:
-  motion (a turntable, an exploded sequence, a moved joint), a finish per
-  body or per occurrence, finishes in the viewer GLBs (one flat material
-  still), and a look at how a manual's own views should be exposed when a
-  project has finishes.
+  contract and what the high-key studio does to a finish's colour. The
+  manual's viewer models carry the looks as glTF materials since the same day
+  (`viewer.py`, `looks.viewer_materials`); a project that chose no look has
+  the one flat material and the same bytes as before. Read back into Blender,
+  the materials are there with their numbers; nobody has looked at such a
+  model in a browser. Not done: a finish per body or per occurrence, and a
+  look at how a manual's own views should be exposed when a project has
+  finishes.
+- Moving pictures (2026-11-19, stage 7.2 of `mechanical-cad`'s plan):
+  `motion.py` draws a turntable, an exploded sequence or the steps of a
+  project as frames and as a video, from the directory a still is made from;
+  `timeline.py` has what needs no Blender (where the camera stands at each
+  frame, the one scale of a turn, how far apart the groups are, where a
+  step's additions come from). Blender's own FFmpeg writes the video on both
+  routes, so no package was added. Not done: a joint moved through its range,
+  which waits for joints as a record in the layout of `mechanical-cad`.
+- The CAD stage takes its own options under FreeCADCmd since 2026-11-19,
+  after a bare `--` (`--pass PROJECT OUT -- --max-triangles 20000`); before,
+  FreeCADCmd took them for its own and stopped.
+- Outlines on full-assembly views: Grease Pencil Line Art was tried without a
+  window on the enclosure's scene on 2026-11-19 and runs in both Blenders,
+  the whole enclosure in under a minute where Freestyle took 32. It is not
+  built in. docs/environment.md has the measurements, what the pictures
+  showed and what is open before it is.
 - Still open here: a single-part preview (render one STEP without a
   hand-written scene), proposed on 2026-11-10 and neither approved nor
   started; `mechanical-cad`'s `tools/picture.py` draws a part without this
@@ -65,7 +84,9 @@ code.
   `geometry.py`, `receipts.py`, `reuse.py` (which earlier views are stale
   under new settings or looks), `looks.py` (what each part is drawn with:
   the look `render.json` names, else its finish, else the default),
-  `views.py` (the named camera positions of a still), `explode.py` (which
+  `views.py` (the named camera positions of a still), `timeline.py` (a
+  moving picture's frames: a turntable's camera, an exploded sequence, the
+  steps), `explode.py` (which
   top-level groups the exploded
   view moves and by how much), `render_settings.py` (looks, budgets,
   long-part thumbnail rules, `inspection_groups`, `joint_views`,
@@ -73,7 +94,9 @@ code.
   (Blender, Cycles default, line budget, wide thumbnails and end views for long
   parts, `--groups` subassembly inspection views, `joint_views` close-ups,
   the exploded view, `--reuse` of earlier views), `still.py` (Blender: a
-  picture of a scene alone, outside a manual), `viewer.py` (bpy: the two
+  picture of a scene alone, outside a manual), `motion.py` (Blender: a
+  turntable, an exploded sequence or a project's steps as frames and video),
+  `viewer.py` (bpy: the two
   viewer GLBs with decimation and anchors), `document.py` + `html.py` + `typst.py`
   (front page with the overview and the exploded view with page references,
   picture-led parts cards, supplementary items, subassembly pages with the
@@ -81,7 +104,7 @@ code.
   compact build record, `viewer/hotspots.json`, the build scope's phase
   quantities, checklist and step chapters, `--appendix`), `checks.py`,
   `cli.py` (`inspect`, `inventory-template`, `manual`, `check`). `tests/` has
-  156 pure-Python tests (all passing on 2026-11-19) plus three in
+  168 pure-Python tests (all passing on 2026-11-19) plus four in
   `tests/test_cad_stage.py`, which run FreeCAD on the units fixture when
   `FreeCADCmd` is on PATH (the CAD role) and are skipped otherwise.
 - `examples/three-part-fixture/` (now with `supplement.json`: three synthetic

@@ -15,8 +15,14 @@ RENDER_DIR (the exploded view's recorded offsets) and writes RENDER_DIR/viewer/:
 glTF conventions (gltf.py): metres, +Y up; one mesh per part shared by every occurrence
 through nodes; node names are occurrence ids; one parent node per subassembly instance named
 by its id, nested as in the scene; parts directly under the root under `root-parts`; no Draco,
-no textures, one flat material. A part whose share of the triangle budget is smaller than its
-mesh is decimated with Blender's collapse decimation (small parts are kept whole first);
+no textures. A project that chose no look for any part has one flat material, as before. Where
+`render.json` names a look for a part, or `finishes.json` gives it a finish, the part's mesh has
+that look as its material (looks.py: the colour as light adds up, how metallic, how rough, and
+blended where its opacity is below 1), named after the look, one material for every look; the
+parts nothing was chosen for keep the flat one. The looks must be the ones the render receipt
+drew, so that the model and the pictures beside it agree. A part whose share of the triangle
+budget is smaller than its mesh is decimated with Blender's collapse decimation (small parts
+are kept whole first);
 normals are split at edges sharper than --sharp-angle so flat faces stay flat. Nothing here
 changes identity, quantity or pose: installed poses come from the scene, exploded offsets from
 the render receipt, and the receipt's scene/asset hashes must match the project.
@@ -31,9 +37,10 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
-from mechanical_docs import explode, geometry, gltf, receipts  # noqa: E402
+from mechanical_docs import explode, geometry, gltf, looks, receipts  # noqa: E402
 from mechanical_docs import transforms as T  # noqa: E402
 from mechanical_docs.manifest import ManifestError, load_project  # noqa: E402
+from mechanical_docs.render_settings import SettingsError, load_settings  # noqa: E402
 
 import bpy  # noqa: E402  (only inside Blender)
 from mathutils import Matrix, Vector  # noqa: E402
@@ -181,6 +188,18 @@ def main(argv):
         raise SystemExit(f"{rp} was made from a different scene, assets, instructions or finishes; render first")
     if rr.get("mesh_hashes") != {pid: rec["mesh"]["sha256"] for pid, rec in meshes["parts"].items()}:
         raise SystemExit(f"{rp} was rendered from different meshes")
+    # what every part is drawn with, as the render stage works it out; the model is to agree with the pictures
+    try:
+        settings, _ = load_settings(project.dir)
+        resolved = looks.resolve(scene.parts, settings, project.finishes)
+    except (SettingsError, looks.LookError) as e:
+        raise SystemExit(str(e))
+    drawn = rr.get("part_looks")
+    if drawn is not None and drawn != resolved:
+        differ = sorted(pid for pid in resolved if drawn.get(pid) != resolved[pid])
+        raise SystemExit(f"{rp} drew {len(differ)} part(s) in other looks than the project gives them now ({', '.join(differ[:5])}"
+                         f"{' ...' if len(differ) > 5 else ''}); render first")
+    materials, material_of = looks.viewer_materials(resolved, gltf.FLAT_MATERIAL) if looks.chosen(resolved) else (None, {})
     exploded = next((v for v in rr["views"] if v.get("kind") == "exploded"), None)
     offsets_mm = exploded["offsets_mm"] if exploded else None
     if exploded is None:
@@ -208,6 +227,8 @@ def main(argv):
         pos, nrm, idx = mesh_arrays(o.data, sharp)
         mesh_index[pid] = len(mesh_list)
         mesh_list.append({"name": pid, "positions": pos, "normals": nrm, "indices": idx})
+        if materials is not None:
+            mesh_list[-1]["material"] = material_of[pid]
     occurrence_counts = {}
     for occ in scene.occurrences.values():
         occurrence_counts[occ.part_id] = occurrence_counts.get(occ.part_id, 0) + 1
@@ -252,7 +273,8 @@ def main(argv):
         path = out / f"{state}.glb"
         size = gltf.write_scene_glb(path, mesh_list, nodes, roots,
                                     extras={"scene_id": scene.id, "state": state, "frame": "metres, +Y up; node names are occurrence ids",
-                                            "offsets_mm": offs or {}, "triangle_budget": budget, "generator": "mechanical-docs viewer.py"})
+                                            "offsets_mm": offs or {}, "triangle_budget": budget, "generator": "mechanical-docs viewer.py"},
+                                    materials=materials)
         files[state] = {**receipts.file_entry(path, render_dir), "nodes": len(nodes), "triangles_instanced": instanced}
         log(f"{path.name}: {size / 1e6:.2f} MB, {len(nodes)} nodes, {instanced} instanced triangles")
     receipt = {
@@ -264,7 +286,16 @@ def main(argv):
         "triangles": {"original_total": sum(original.values()), "decimated_total": sum(decimated.values()), "instanced_total": instanced,
                       "parts": {pid: {"original": original[pid], "decimated": decimated[pid], "occurrences": occurrence_counts.get(pid, 0)} for pid in objs}},
         "offsets_mm": offsets_mm, "exploded_view_present": exploded is not None,
-        "files": files, "anchors": anchors, "material": "one flat material (gltf.FLAT_MATERIAL); no textures; no Draco",
+        "files": files, "anchors": anchors,
+        "material": "one flat material (gltf.FLAT_MATERIAL); no textures; no Draco" if materials is None else
+                    "one material for every look chosen in render.json or finishes.json, the flat material (gltf.FLAT_MATERIAL) for the parts "
+                    "in the default look; no textures; no Draco",
+        **({} if materials is None else {
+            "materials": [{"index": k, "name": m["name"], "source": m.get("extras", {}).get("source", "viewer"),
+                           "base_color_factor": m["pbrMetallicRoughness"]["baseColorFactor"], "metallic": m["pbrMetallicRoughness"]["metallicFactor"],
+                           "roughness": m["pbrMetallicRoughness"]["roughnessFactor"], "alpha_mode": m.get("alphaMode", "OPAQUE"),
+                           "parts": sorted(pid for pid, which in material_of.items() if which == k)} for k, m in enumerate(materials)],
+            "part_looks": resolved}),
         "not_checked": ["appearance in a browser (model-viewer)", "anchor visibility from every orbit"],
         "seconds": round(time.time() - t0, 1),
     }

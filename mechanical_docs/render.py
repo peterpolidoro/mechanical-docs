@@ -888,6 +888,56 @@ class Renderer:
         self.restore(); self.verify_restored(view_id)
         return rec
 
+    def turn_lights(self, angle=0.0):
+        """Stand the studio's lights where the settings put them, turned by `angle`
+        (radians) about the vertical axis through the scene's centre. A turntable
+        turns them with its camera, so that what the camera sees is lit from the
+        same side all the way round; without an angle they are back where
+        setup_studio put them."""
+        turn = Matrix.Rotation(angle, 3, "Z")
+        for lo, spec in zip(self.lights, self.s["studio"].values()):
+            d = turn @ Vector(spec["direction"]).normalized()
+            lo.location = self.scene_centre + d * spec["distance"] * self.scene_radius
+            lo.rotation_euler = d.to_track_quat("Z", "Y").to_euler()
+        bpy.context.view_layer.update()
+
+    def frame_camera(self, stands, up, target, ortho_scale, reach):
+        """An orthographic camera whose scale is given, not fitted: it stands in
+        the direction `stands` from `target` (metres), outside everything that
+        lies within `reach` of it, and `target` is the middle of the picture.
+        The frames of a turntable all have one scale this way."""
+        d = Vector(stands).normalized()
+        t = Vector(target)
+        self.aim(t + d * max(self.scene_radius * 4, reach * 4, 1e-3), t, Vector(up))
+        self.cam.data.type = "ORTHO"
+        self.cam.data.ortho_scale = ortho_scale
+        bpy.context.view_layer.update()
+
+    def render_frame(self, view_id, members, offsets_m=None, kind="frame", **extra):
+        """One frame of a moving picture (motion.py): the occurrences in
+        `members` in their looks, each moved from its canonical pose by its
+        entry in `offsets_m` (metres, scene frame) when it has one, seen by the
+        camera as it stands. The resolution and the camera are the caller's.
+        The offsets are illustration transforms only; the poses are restored
+        and verified after the frame like after every other view."""
+        self.restore()
+        shown = set(members)
+        for oid, o in self.obj_of.items():
+            o.hide_render = oid not in shown
+        for oid in members:
+            self.coll_subject.objects.link(self.obj_of[oid])
+        for oid, off in (offsets_m or {}).items():
+            o = self.obj_of[oid]
+            o.location = o.location + Vector(off)
+        bpy.context.view_layer.update()
+        self.place_floor([self.obj_of[oid] for oid in members], kind)
+        path, secs = self.render_to(view_id, self.samples())
+        rec = {"id": view_id, "file": path.name, "sha256": receipts.sha256_file(path), "bytes": path.stat().st_size,
+               "seconds": round(secs, 1), "lines": self.last_view.get("lines"), "visible_triangles": self.last_view.get("visible_triangles")}
+        rec.update(extra)
+        self.restore(); self.verify_restored(view_id)
+        return rec
+
     def render_joint(self, spec):
         """A close-up of one project joint: the listed occurrences framed alone
         at their canonical poses, the rest of the context assembly subdued

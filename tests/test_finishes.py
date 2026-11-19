@@ -228,6 +228,47 @@ def test_the_fixture_draws_the_base_in_its_finish_and_the_pin_as_render_json_say
 
 # ------------------------------------------------------------------ where a still's camera stands
 
+# ------------------------------------------------------------------ the viewer's models
+
+def test_a_project_that_chose_nothing_keeps_one_flat_material():
+    flat = {"name": "flat"}
+    nothing = looks.resolve(["base", "pin"], settings(), None)
+    assert looks.chosen(nothing) is False
+    assert looks.viewer_materials(nothing, flat) == ([flat], {"base": 0, "pin": 0})
+
+
+def test_a_chosen_look_is_a_material_of_the_viewer_s_model():
+    pr = load_project(TWO_BASES)
+    s, _ = load_settings(pr.dir)
+    resolved = looks.resolve(pr.scene.parts, s, pr.finishes)
+    assert looks.chosen(resolved)
+    flat = {"name": "flat"}
+    materials, of = looks.viewer_materials(resolved, flat)
+    assert materials[0] is flat and [m["name"] for m in materials[1:]] == ["clear-acrylic", "red-plastic"]
+    assert of == {"base": 1, "pin": 2}
+    acrylic, red = materials[1], materials[2]
+    # the base's finish: its colour as light adds up, its opacity as the alpha, and blended, since it lets light through
+    assert acrylic["pbrMetallicRoughness"]["baseColorFactor"] == resolved["base"]["base"] + [0.35]
+    assert acrylic["alphaMode"] == "BLEND" and acrylic["extras"] == {"source": "finishes.json"} and acrylic["doubleSided"] is True
+    assert (acrylic["pbrMetallicRoughness"]["metallicFactor"], acrylic["pbrMetallicRoughness"]["roughnessFactor"]) == (0.0, 0.15)
+    # the pin as render.json says, opaque: no alpha mode is said, which is opaque
+    assert red["extras"] == {"source": "render.json"} and "alphaMode" not in red and red["pbrMetallicRoughness"]["baseColorFactor"][3] == 1.0
+
+
+def test_parts_of_one_look_share_a_material_and_the_default_stays_flat(project_copy):
+    f = load_project(write(project_copy).dir).finishes
+    resolved = looks.resolve(["base", "pin", "washer", "nut"], settings(looks={"washer": "brass", "nut": "brass"}), f)
+    materials, of = looks.viewer_materials(resolved, {"name": "flat"})
+    # base has a finish, the pin has none and is in the default look, washer and nut share a palette entry
+    assert [m["name"] for m in materials] == ["flat", "black-anodized", "brass"]
+    assert of == {"base": 1, "pin": 0, "washer": 2, "nut": 2}
+    # a finish and a palette entry of one name stay two materials
+    twice = looks.resolve(["base", "pin"], settings(looks={"pin": "black-anodized"}), f)
+    materials, of = looks.viewer_materials(twice, {"name": "flat"})
+    assert [m["name"] for m in materials] == ["flat", "black-anodized", "black-anodized"] and of == {"base": 1, "pin": 2}
+    assert [m["extras"]["source"] for m in materials[1:]] == ["finishes.json", "render.json"]
+
+
 def test_named_views_are_those_of_mechanical_cad_picture():
     assert views.stands("iso") == ((1.0, -1.0, 0.8), views.Z_UP)
     assert views.stands("iso-back") == ((-1.0, 1.0, 0.8), views.Z_UP)

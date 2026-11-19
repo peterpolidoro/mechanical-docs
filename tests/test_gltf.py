@@ -90,6 +90,30 @@ def test_scene_glb_shares_meshes_through_nodes(tmp_path):
     assert i2 == idx and len(p2) == len(v)
 
 
+def test_scene_glb_gives_each_mesh_the_material_it_names(tmp_path):
+    v, idx = unit_cube()
+    pos = [gltf.to_gltf_frame(p, 0.001) for p in v]
+    nrm = [(0.0, 1.0, 0.0)] * len(pos)
+    cube = {"name": "cube", "positions": pos, "normals": nrm, "indices": idx}
+    clear = {"name": "clear-acrylic", "pbrMetallicRoughness": {"baseColorFactor": [0.5, 0.8, 0.9, 0.35], "metallicFactor": 0.0, "roughnessFactor": 0.15},
+             "alphaMode": "BLEND"}
+    nodes = [{"name": "a", "mesh": 0, "matrix": None, "children": []}, {"name": "b", "mesh": 1, "matrix": None, "children": []},
+             {"name": "c", "mesh": 2, "matrix": None, "children": []}]
+    path = tmp_path / "looks.glb"
+    gltf.write_scene_glb(path, [dict(cube, name="plain"), dict(cube, name="window", material=1), dict(cube, name="other", material=0)],
+                         nodes, [0, 1, 2], materials=[gltf.FLAT_MATERIAL, clear])
+    doc, _ = gltf.read_glb(path)
+    assert [m["name"] for m in doc["materials"]] == ["flat", "clear-acrylic"] and doc["materials"][1]["alphaMode"] == "BLEND"
+    assert [m["primitives"][0]["material"] for m in doc["meshes"]] == [0, 1, 0]         # a mesh that names none has the first
+    for wrong in (2, -1, True, "clear-acrylic"):
+        with pytest.raises(ValueError, match="material"):
+            gltf.write_scene_glb(path, [dict(cube, material=wrong)], nodes[:1], [0], materials=[gltf.FLAT_MATERIAL, clear])
+    # without materials the file is what it always was: one flat material, whatever a mesh says
+    gltf.write_scene_glb(path, [cube], nodes[:1], [0])
+    doc, _ = gltf.read_glb(path)
+    assert doc["materials"] == [gltf.FLAT_MATERIAL] and doc["meshes"][0]["primitives"][0]["material"] == 0
+
+
 def test_frame_matrix_keeps_rotations_rigid():
     from mechanical_docs import transforms as T
     m = gltf.frame_matrix_gltf(T.rotation_z(90))

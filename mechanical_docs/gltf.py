@@ -3,7 +3,8 @@
 `write_glb`: one mesh per file, one node (the CAD stage's per-part meshes).
 `write_scene_glb`: several meshes shared by a node tree with matrices (the
 viewer export: one mesh per part, one node per occurrence, one parent node
-per subassembly instance), one flat material. Float32 positions and normals, uint32 indices.
+per subassembly instance), one flat material, or one material per look when
+the meshes name theirs. Float32 positions and normals, uint32 indices.
 Positions are written in glTF's convention (metres, +Y up). The conversion
 from the scene frame (+Z up, declared units) is done here, once, by
 `to_gltf_frame`; Blender's glTF importer converts back to +Z up on import,
@@ -92,10 +93,13 @@ def frame_matrix_gltf(world_m):
     return [M[r][c] for c in range(4) for r in range(4)]
 
 
-def write_scene_glb(path, meshes, nodes, roots, extras=None, material=None):
-    """meshes: [{"name", "positions", "normals", "indices"}] in glTF frame (metres);
+def write_scene_glb(path, meshes, nodes, roots, extras=None, material=None, materials=None):
+    """meshes: [{"name", "positions", "normals", "indices"}] in glTF frame (metres), each with an optional
+    "material", an index into `materials`;
     nodes: [{"name", "mesh": index or None, "matrix": 16 floats or None, "children": [node indices]}];
-    roots: node indices of the scene. One material for every primitive. Returns the byte size."""
+    roots: node indices of the scene. Without `materials` there is one material for every primitive,
+    `material` or the flat one. Returns the byte size."""
+    materials = list(materials) if materials else [material or FLAT_MATERIAL]
     binary = bytearray(); views = []; accessors = []; out_meshes = []
 
     def add_view(data, target):
@@ -116,7 +120,10 @@ def write_scene_glb(path, meshes, nodes, roots, extras=None, material=None):
         accessors += [{"bufferView": vp, "componentType": 5126, "count": len(pos), "type": "VEC3", "min": mins, "max": maxs},
                       {"bufferView": vn, "componentType": 5126, "count": len(nrm), "type": "VEC3"},
                       {"bufferView": vi, "componentType": 5125, "count": len(idx), "type": "SCALAR"}]
-        out_meshes.append({"name": m["name"], "primitives": [{"attributes": {"POSITION": a0, "NORMAL": a0 + 1}, "indices": a0 + 2, "mode": 4, "material": 0}]})
+        which = m.get("material", 0)
+        if isinstance(which, bool) or not isinstance(which, int) or not 0 <= which < len(materials):
+            raise ValueError(f"mesh {m['name']!r}: material {which!r} is not one of the {len(materials)} given")
+        out_meshes.append({"name": m["name"], "primitives": [{"attributes": {"POSITION": a0, "NORMAL": a0 + 1}, "indices": a0 + 2, "mode": 4, "material": which}]})
     out_nodes = []
     for n in nodes:
         node = {"name": n["name"]}
@@ -128,7 +135,7 @@ def write_scene_glb(path, meshes, nodes, roots, extras=None, material=None):
             node["children"] = list(n["children"])
         out_nodes.append(node)
     doc = {"asset": {"version": "2.0", "generator": "mechanical-docs gltf.py"}, "scene": 0, "scenes": [{"nodes": list(roots)}],
-           "nodes": out_nodes, "meshes": out_meshes, "materials": [material or FLAT_MATERIAL],
+           "nodes": out_nodes, "meshes": out_meshes, "materials": materials,
            "accessors": accessors, "bufferViews": views, "buffers": [{"byteLength": len(binary)}]}
     if extras:
         doc["asset"]["extras"] = extras

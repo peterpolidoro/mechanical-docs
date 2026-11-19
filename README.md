@@ -12,7 +12,9 @@ loader (scene, inventory with an optional stock record, instructions,
 build phase, `finishes.json` for what a picture draws each part with), a
 FreeCAD STEP-to-mesh stage, a Blender render stage (Cycles with
 OpenImageDenoise through the `bpy` wheel, EEVEE on the Guix Blender), pictures
-outside a manual from a scene alone (`still.py`, since 2026-11-19), an
+outside a manual from a scene alone, still (`still.py`) and moving
+(`motion.py`: a turntable, an exploded sequence, the steps of a project, as
+video; both since 2026-11-19), an
 optional viewer export, and a document stage that writes one `manual.json` and
 generates HTML and a Typst PDF from it, with an output checker. Three synthetic
 fixtures build end to end. The enclosure snapshot (37 parts, 155 occurrences)
@@ -60,7 +62,7 @@ Or stage by stage, each in its Guix role (see [docs/environment.md](docs/environ
 ```sh
 python3 -m mechanical_docs inventory-template PROJECT      # draft inventory.json from a scene (required = installed occurrences)
 python3 -m mechanical_docs inspect examples/three-part-fixture --json build/inspect.json
-FreeCADCmd mechanical_docs/cad_mesh.py --pass examples/three-part-fixture build/meshes [--max-triangles 50000]
+FreeCADCmd mechanical_docs/cad_mesh.py --pass examples/three-part-fixture build/meshes [-- --max-triangles 50000]
 pixi run -e render render examples/three-part-fixture build/meshes/meshes.json build/renders [--preview] [--engine BLENDER_EEVEE_NEXT] [--no-lines] [--groups pin-pair] [--reuse build/renders-old]
 blender -b --python mechanical_docs/render.py -- examples/three-part-fixture build/meshes/meshes.json build/renders --engine BLENDER_EEVEE_NEXT
 .pixi/envs/render/bin/python mechanical_docs/viewer.py examples/three-part-fixture build/meshes/meshes.json build/renders [--budget 200000]   # optional: viewer GLBs beside the renders
@@ -91,6 +93,27 @@ rough, how opaque; derived by `mechanical-cad` from the project's own
 colours (`still_exposure`); a manual's views keep the high-key studio, in
 which light finishes come out white with dark outlines.
 
+The same directory gives a moving picture, as frames and as a video that
+Blender's own FFmpeg writes from them (H.264 in an MP4 file, or VP9 with
+`--webm`):
+
+```sh
+blender -b --python mechanical_docs/motion.py -- SCENE_DIR build/meshes/meshes.json build/motion turntable [--group ASSEMBLY_ID] [--frames 72] --engine BLENDER_EEVEE_NEXT
+blender -b --python mechanical_docs/motion.py -- SCENE_DIR build/meshes/meshes.json build/motion exploded [--frames 36] [--hold 12] [--return] --engine BLENDER_EEVEE_NEXT
+blender -b --python mechanical_docs/motion.py -- PROJECT_DIR build/meshes/meshes.json build/motion steps [--frames 18] [--hold 8] --engine BLENDER_EEVEE_NEXT
+pixi run -e render motion SCENE_DIR build/meshes/meshes.json build/motion turntable      # Cycles, the reference look
+```
+
+A `turntable` takes the camera once round what is drawn, at one scale and
+with the lights turning with it. An `exploded` sequence moves the top-level
+groups apart to the offsets of the exploded view and, with `--return`, back.
+`steps` needs a project with instructions and follows them: what a step adds
+arrives at its seat while what earlier steps added stays. Each writes
+`<name>-frames/frame-0001.png` and so on, `<name>.mp4` and a receipt,
+`<name>.json`. Frames have no outlines unless `--lines` asks for them, and no
+floor unless `floor.views` in `render.json` names their kind. All three are
+illustrations: where a part comes from in them is no insertion path.
+
 `--groups` (or `inspection_groups` in `render.json`) renders named subassemblies
 alone as inspection views; `joint_views` in `render.json` renders per-joint
 close-ups (the listed occurrences framed, the rest of their context faded or
@@ -99,7 +122,9 @@ or more groups) draws the subassemblies apart for the front page, every child
 assembly of the root and the parts directly under it moved as a rigid body by
 a recorded offset (radial default, or the project's `offset_mm`); `viewer.py`
 then exports `viewer/assembled.glb` and `viewer/exploded.glb` with the same
-offsets plus anchors for a web model viewer; `--reuse` copies views from an earlier complete receipt made from
+offsets plus anchors for a web model viewer, each part in the look that
+`render.json` or `finishes.json` chose for it, or all in one flat material
+when nothing was chosen; `--reuse` copies views from an earlier complete receipt made from
 the same scene, assets, instructions, meshes and engine (inventory and
 supplement changes never invalidate it), so changing a few thumbnails does not
 mean rendering the whole assembly again (each copied view is marked

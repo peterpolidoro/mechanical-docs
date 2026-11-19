@@ -32,9 +32,12 @@ their measurements and evidence runs, are in .agents/HISTORY.md.
   it at preview quality (staging, inspect, meshes, 88 renders, manual,
   check: all passed), and the manual has the steps, joints, quantities and
   groups of the published one. No full-quality render has been made of it.
-  The mesh script cannot be given `--max-triangles` under FreeCADCmd 1.1.3,
-  which takes a dashed option after `--pass` for its own; the default is the
-  value the project's recipe asked for.
+  On 2026-11-19 the manual was built again from the project as it stands,
+  with the code as committed that morning and from a clean clone: 86 views
+  with Cycles at preview quality in 41 minutes (the two largest subassembly
+  views, with outlines, about 11 minutes each), a PDF of 59 pages as the
+  published one has, and all 32 checks passed; the viewer stage was not
+  run. It is in the project's ignored `.cache/manual-preview-2026-11-19/`.
 - **Finishes (2026-11-19).** Peter decided that day that what a picture draws
   each part with is one hand-edited file for the whole project
   (`finishes.toml`, in `mechanical-cad`'s layout). `mechanical-cad`'s flatten
@@ -58,8 +61,45 @@ their measurements and evidence runs, are in .agents/HISTORY.md.
   stage lights a face that looks up about seven times as brightly as its
   colour, so that at exposure 0 a mid-grey finish is white on top. A
   manual's own views keep exposure 0.
-- Run on 2026-11-19: the pure-Python suite, 156 passed and 3 skipped; with
-  FreeCAD, 159 passed. Rendered that day with Cycles and with EEVEE: stills
+- **Motion (2026-11-19), stage 7.2 of `mechanical-cad`'s plan.**
+  `mechanical_docs/motion.py` draws three sequences from the directory a
+  still is made from and writes each as frames, a video and a receipt: a
+  turntable of the scene or of one subassembly, at one scale for the whole
+  turn and with the lights turning with the camera; the top-level groups
+  moving apart to the offsets of the exploded view, and back; and, for a
+  project with instructions, the steps in the manual's order, what each
+  adds arriving at its seat. Blender's own FFmpeg writes the video on both
+  routes (H.264, or VP9 with `--webm`), and the file is read back and held
+  to its frame count. Outlines and the floor are off in frames unless asked
+  for. What needs no Blender is in `timeline.py`, with tests. On the
+  enclosure, Cycles at preview quality, 960 x 720: a turntable of one tank
+  support frame (72 frames, 296 s), of the whole enclosure (72 frames,
+  176 s) and the exploded sequence there and back (95 frames, 275 s); with
+  EEVEE the whole enclosure takes 0.7 s a frame. And the steps of the
+  enclosure's staged project, its eighteen draft steps in their order: 468
+  frames, 19.5 s of video, in 129 s with EEVEE in the Guix Blender; the
+  frame, the camera frame, the panels and the top arrive in that order. A
+  joint moved through its range is not built: the layout has no record for
+  joints. Not run: a video at full quality, and a steps sequence with a
+  perspective view.
+- **Smaller, the same day.** The CAD stage takes its own options after a
+  bare `--` (`--pass PROJECT OUT -- --max-triangles 20000`), which
+  FreeCADCmd 1.1.3 otherwise takes for its own. The manual's viewer models
+  give a part the look that was chosen for it, in `render.json` or in
+  `finishes.json`, as a glTF material named after it; a project that chose
+  nothing gets the same bytes as before. Nobody has looked at such a model
+  in a browser.
+- **Outlines on whole assemblies, measured and not built** (2026-11-19).
+  Grease Pencil Line Art runs without a window in both Blenders and draws
+  the whole enclosure, 2.44 million triangles, in under a minute where
+  Freestyle took 32 minutes; drawn in front, it reads like a Freestyle
+  picture. Left open before it can stand in: some edges of the thin-walled
+  tank come out broken, two widths for subject and context, perspective
+  views, and what `--reuse` makes of a view that gains lines. The modifier
+  must be added only for the render call, or it is worked out again at
+  every scene update. docs/environment.md has the measurements.
+- Run on 2026-11-19: the pure-Python suite, 168 passed and 4 skipped; with
+  FreeCAD, 172 passed. Rendered that day with Cycles and with EEVEE: stills
   of the two-bases fixture and of a scratch scene. And of the enclosure,
   from its scene flattened by `mechanical-cad` with the project's draft
   finishes into a scratch directory and meshed there (37 parts, every check
@@ -85,12 +125,20 @@ their measurements and evidence runs, are in .agents/HISTORY.md.
    the studio as it is, a finish lighter than a dark grey comes out white on
    top in every view of a manual, as the palette's light entries do. Until
    Peter has seen it and said what he wants, a project's finishes are for
-   stills, and the enclosure's recipe does not hand `finishes.json` to the
-   manual.
-4. Motion, stage 7.2 of `mechanical-cad`'s plan: a turntable, an exploded
-   sequence that follows the manual's steps, a joint moved through its
-   range, each as video. The first two need nothing more from the layout;
-   the third waits for joints and poses as records there.
+   stills and videos, and the enclosure's recipe does not hand
+   `finishes.json` to the manual. For him to look at: six of the
+   enclosure's views as the manual draws them today, and with the project's
+   finishes at exposure 0, -1.5 and -2.5, on one sheet in that project's
+   ignored `.cache/pictures/manual-views-finishes-and-exposure.png`. At 0
+   the light finishes are white as before and black ABS is a mid grey; at
+   -1.5 the colours read and the pages stay light; at -2.5 the colours are
+   nearest their finishes and the pictures are heavy. A thin framing
+   extrusion is dark at every setting: its outlines fill it.
+4. A joint moved through its range, as video: it waits for joints and poses
+   as records in the layout, which is Peter's word in `mechanical-cad`.
+5. Outlines on whole assemblies with Line Art, if the four points left open
+   above are worth settling: the published manual's overview and most of
+   its steps have no outlines today.
 
 ## Open items
 
@@ -111,7 +159,8 @@ Left by the finishes work of 2026-11-19:
 
 - A finish belongs to a part. A finish for one body of a part or for one
   occurrence has no place, in the layout or here.
-- The viewer GLBs still carry one flat material.
+- A palette entry's coat is not carried into the viewer models, and the
+  flat material stays in the file when no part uses it.
 - EEVEE draws a translucent finish by blending and shows blotches in the
   shadow near it; Cycles is the reference for such a part.
 - No translucent finish has been tried on anything larger than a fixture
@@ -122,8 +171,8 @@ Carried from earlier checkpoints:
 - Instruction model: close-up views, per-step view overrides, moves and
   removals, tools, checkpoints.
 - Line art on full-assembly views. Freestyle is off above the line budget, so
-  the overview and the exploded view have no outlines. Evaluate Grease Pencil
-  Line Art in background mode. Not blocking.
+  the overview and the exploded view have no outlines. Grease Pencil Line Art
+  was measured on 2026-11-19 ("Current state"); not built in.
 - The viewer GLBs were checked structurally; no record says anyone has looked
   at them in a browser. No browser print test has been run.
 - A technician's review of printed pages, and the physical-validation record

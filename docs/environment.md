@@ -27,8 +27,15 @@ or coreutils unless listed, so the wrapper script runs each tool directly.
 `--pass` are opened as documents. The script runs in FreeCAD's own namespace,
 not as `__main__`, and an uncaught exception is printed as one line while the
 process still exits 0, so `cad_mesh.py` prints its own traceback and the
-pipeline tests for the receipt file rather than the exit status. FreeCAD's
-Python ABI is separate from Blender's; the two stages share only files.
+pipeline tests for the receipt file rather than the exit status. FreeCADCmd
+1.1.3 also reads a dashed option itself wherever it stands, even after
+`--pass`, and stops with its usage text at one it does not know. So the
+script's own options go after a bare `--`, which FreeCADCmd takes as the end
+of its own and the script drops: `--pass PROJECT OUT -- --max-triangles 20000`
+(since 2026-11-19; before that the stage's options could not be given under
+FreeCADCmd at all, and every production mesh was made with the defaults).
+FreeCAD's Python ABI is separate from Blender's; the two stages share only
+files.
 
 ## Blender: two routes, one renderer
 
@@ -71,7 +78,7 @@ superlinearly with edge count: the first enclosure overview (155 occurrences,
 5.2 million triangles at 0.05 mm deflection, threaded hardware included) took
 93 minutes for one 1600 px image while a 320-vertex panel thumbnail took 10 s
 and a 132 000-triangle corner cube 123 s. Two budgets keep this bounded:
-`cad_mesh.py --max-triangles` (default 50 000 per part) re-meshes a part from a
+`cad_mesh.py -- --max-triangles N` (default 50 000 per part) re-meshes a part from a
 freshly read shape with the deflections coarsened by 1.6 per attempt until it
 fits, recording every attempt in `meshes.json`; and `lines.max_triangles` in
 the render settings (default 3 million visible triangles, 400 000 for
@@ -81,7 +88,40 @@ it, with a warning in the receipt and `lines: false` on the view record.
 on the same enclosure (2.44 million triangles, 37 parts, 155 occurrences): CAD
 stage 2 min 22 s, thumbnails 9.5 to 23 s each, overview 51 s without lines and
 32 min with them. Grease Pencil Line Art is the candidate replacement if that
-is still too slow for step views; it has not been tried in background mode here.
+is still too slow for step views.
+
+Line Art was tried in background mode on 2026-11-19, on the enclosure's scene
+(1200 x 900, the view `iso`, on a machine that was rendering other things at
+the same time, so the times are upper bounds), from a script outside this
+repository; nothing here draws with it yet. A Grease Pencil object with one
+Line Art modifier over the collection of what a view draws (contour and
+crease lines, no intersections) runs without a window in both Blenders:
+
+| What is drawn | Blender, engine | Without lines | Freestyle | With Line Art |
+| --- | --- | --- | --- | --- |
+| one tank support frame, 343 000 triangles | Guix 4.5.10, EEVEE | 0.8 s | 44 s | 19 s |
+| the same | bpy 4.5.14, EEVEE | 10 s | | 19 s |
+| the same | bpy 4.5.14, Cycles | 15 s | | 33 s |
+| the whole enclosure, 2.44 million triangles | Guix 4.5.10, EEVEE | 1.5 s | not run; 32 min at 1600 px on 2026-10-22 | 44 s |
+| the same | bpy 4.5.14, Cycles | 8 s | | 48 s |
+
+The times are those of the render call. The modifier is worked out again at
+every update of the scene, and a view's framing makes several: with the
+object in the scene from the start, the same views took 85 to 131 s. Whoever
+builds this in adds the object for the render call alone. What the pictures
+showed: the lines have to be drawn in front (`show_in_front`), since they are
+already the visible ones and are otherwise cut up by the surfaces they lie
+on; their width is a length in the scene, so it has to follow the picture's
+scale (two pixels on the whole enclosure were a radius of 3 mm); drawn so,
+the whole enclosure reads as a Freestyle picture does, edges, handles and
+casters outlined and the framing's many edges run together into dark bands.
+On the thin-walled tank some edges still came out broken, where two edges
+lie a wall's thickness apart; and like Freestyle it draws no edge behind a
+translucent part. Open before it is built in: two widths and colours for
+what a step adds and what was there before, as the two Freestyle line sets
+have; a perspective view, where one width in the scene is not one width in
+the picture; and what `--reuse` makes of a view that had no lines and would
+now have them.
 
 Two mechanisms keep a production rebuild short. `render.py --reuse DIR` copies
 every planned view that an earlier complete receipt holds for the same scene,
@@ -144,6 +184,30 @@ exposure 0 a `#808080` finish is white on top, and at the stills' default of
 -2.5 stops it reads back as 140 with Cycles and 139 with EEVEE. EEVEE draws a
 translucent finish by blending and shows some blotches in the shadow near
 it; Cycles is the reference for such a part too.
+
+A moving picture (`motion.py`, 2026-11-19) runs on either route as a still
+does: `blender -b --python mechanical_docs/motion.py -- SCENE_DIR MESHES_JSON
+OUT_DIR turntable --engine BLENDER_EEVEE_NEXT` in the Guix render role, or
+`pixi run -e render motion SCENE_DIR MESHES_JSON OUT_DIR turntable` for
+Cycles. The video is written by Blender's own FFmpeg, which both builds have
+(libavcodec 60.31 in the Guix Blender 4.5.10, 61.19 in the bpy wheel 4.5.14):
+the frames, read back from disk as an image strip over white in a scene of
+its own, as H.264 in an MP4 file or, with `--webm`, VP9. No package was added
+for it. `ffprobe` of Guix's `ffmpeg` was used once to look at the files and
+agreed with what Blender reads back of them; it is no part of any role.
+A frame costs what a still of the same size costs without the floor and
+without outlines, which is how frames are drawn unless asked otherwise:
+under a second on a fixture with either engine. On the enclosure's scene
+with the project's draft finishes (Cycles, 16 samples with the denoiser,
+960 x 720, on a machine that was rendering other things at the same time):
+a turntable of one tank support frame, 72 frames, 3.6 to 6.0 s a frame and
+296 s in all, a file of 1.7 MB; a turntable of the whole enclosure, 72
+frames, 2.1 to 3.5 s a frame and 176 s, 0.2 MB; an exploded sequence of the
+whole enclosure that comes back together, 95 frames, 2.1 to 5.7 s a frame
+and 275 s, 0.3 MB. The same sequence with the shadow-catcher floor took 7 to
+17 s a frame and 929 s. With EEVEE in the Guix Blender the whole enclosure
+took 0.7 s a frame, 24 frames in 22 s. Outlines (`--lines`) were tried on a
+fixture only: Freestyle took 44 s on one frame of the tank support frame.
 
 ## Typst and Poppler
 

@@ -21,8 +21,9 @@ FREECAD = shutil.which("FreeCADCmd")
 pytestmark = pytest.mark.skipif(FREECAD is None, reason="FreeCADCmd not on PATH (run in the CAD role)")
 
 
-def run_stage(project, out):
-    r = subprocess.run([FREECAD, str(ROOT / "mechanical_docs" / "cad_mesh.py"), "--pass", str(project), str(out)], capture_output=True, text=True, timeout=600)
+def run_stage(project, out, *options):
+    r = subprocess.run([FREECAD, str(ROOT / "mechanical_docs" / "cad_mesh.py"), "--pass", str(project), str(out), *options],
+                       capture_output=True, text=True, timeout=600)
     receipt = out / "meshes.json"
     log = r.stdout + r.stderr
     assert receipt.is_file(), log[-3000:]
@@ -86,3 +87,17 @@ def test_a_scene_alone_is_meshed_as_a_project_is(tmp_path):
     assert {pid: p["mesh"]["sha256"] for pid, p in rec["parts"].items()} == {pid: p["mesh"]["sha256"] for pid, p in whole["parts"].items()}
     # the finishes are no geometry: the scene and the assets hash as they do in the project
     assert all(rec["input_hashes"][k] == whole["input_hashes"][k] for k in rec["input_hashes"] if k != "finishes.json")
+
+
+def test_the_stage_s_own_options_go_after_a_bare_double_dash(tmp_path):
+    """FreeCADCmd reads a dashed option itself, even after --pass, and stops at one it does not know. A bare `--`
+    before them hands the script its own: a triangle budget, a deflection."""
+    rec, log = run_stage(FIX, tmp_path / "meshes", "--", "--max-triangles", "400", "--linear-deflection", "0.1")
+    assert rec["all_checks_passed"] and "exit status 0" in log
+    assert rec["tessellation"]["max_triangles_per_part"] == 400 and rec["tessellation"]["linear_deflection"] == 0.1
+    base = rec["parts"]["base-cm"]["mesh"]
+    assert base["triangles"] <= 400 and len(base["tessellation_attempts"]) > 1       # coarsened until it fitted
+    # without the bare `--` FreeCADCmd takes the option for its own, and the stage never runs
+    r = subprocess.run([FREECAD, str(ROOT / "mechanical_docs" / "cad_mesh.py"), "--pass", str(FIX), str(tmp_path / "none"), "--max-triangles", "400"],
+                       capture_output=True, text=True, timeout=600)
+    assert not (tmp_path / "none" / "meshes.json").exists() and "[cad_mesh]" not in r.stdout + r.stderr
